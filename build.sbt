@@ -6,9 +6,12 @@ lazy val root = (project in file("."))
   )
   .settings(
     name := "root",
-    publish / skip := true
+    publish / skip := true,
+    organization := ProjectInfo.organization,
+    version := ProjectInfo.buildVersion,
+    scalaVersion := ProjectInfo.scalaVersion
   )
 
 lazy val `utils` = project
-lazy val `core` = project.dependsOn(`utils`)
-lazy val `demo` = project.dependsOn(`core`)
+lazy val `core`  = project.dependsOn(`utils`)
+lazy val `demo`  = project.dependsOn(`core`)
