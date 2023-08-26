@@ -4,12 +4,13 @@ import core.ql
 import utils.list.{FixedList, List0, List1, List2}
 
 sealed trait LogicalPlan {
+  def describe(): String
   def children(): FixedList[LogicalPlan]
 }
 
 case class Scan(table: ql.TableID, projection: Seq[String]) extends LogicalPlan {
 
-  override def toString: String = {
+  override def describe(): String = {
     if (projection.isEmpty) {
       s"SCAN ${table.id}"
     } else {
@@ -21,7 +22,7 @@ case class Scan(table: ql.TableID, projection: Seq[String]) extends LogicalPlan 
 }
 
 case class Project(fields: Seq[ql.FieldID], parent: LogicalPlan) extends LogicalPlan {
-  override def toString: String = s"PROJECT ${fields.map(_.toString).mkString(", ")}"
+  override def describe(): String = s"PROJECT ${fields.map(f => s"${f.table.id}.${f.id}").mkString(", ")}"
 
   override def canEqual(other: Any): Boolean = other.isInstanceOf[Project]
 
@@ -37,7 +38,7 @@ case class Project(fields: Seq[ql.FieldID], parent: LogicalPlan) extends Logical
 }
 
 case class Join(left: LogicalPlan, right: LogicalPlan) extends LogicalPlan {
-  override def toString: String = "JOIN"
+  override def describe(): String = "JOIN"
 
   override def canEqual(that: Any): Boolean = that.isInstanceOf[Join]
 

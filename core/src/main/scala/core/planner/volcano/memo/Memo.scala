@@ -47,7 +47,7 @@ class Memo(
         groups.put(id, group)
         group
     }
-    parents += exprGroup -> group
+    parents += exprGroup.id -> group
     group
   }
 }

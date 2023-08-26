@@ -4,6 +4,7 @@ import core.ctx.QueryExecutionContext
 import core.planner.volcano.logicalplan.{Join, LogicalPlan, Project, Scan}
 import core.ql
 import core.ql.{FieldID, QueryParser}
+import core.utils.visualization.LogicalPlanVizUtils.Mermaid
 import org.scalamock.scalatest.proxy.MockFactory
 import org.scalatest.flatspec.AnyFlatSpec
 
@@ -25,6 +26,7 @@ class LogicalPlanSpec extends AnyFlatSpec with MockFactory {
       case Left(err) => fail(err)
       case Right(parsed) =>
         val plan = LogicalPlan.toPlan(parsed)
+        println(plan.getMermaidViz)
         assert(
           plan == Project(
             Seq(
