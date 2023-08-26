@@ -1,11 +1,10 @@
 package core.planner.volcano.logicalplan
 
 import core.ql
-import utils.list.{FixedList, List0, List1, List2}
 
 sealed trait LogicalPlan {
   def describe(): String
-  def children(): FixedList[LogicalPlan]
+  def children(): Seq[LogicalPlan]
 }
 
 case class Scan(table: ql.TableID, projection: Seq[String]) extends LogicalPlan {
@@ -18,7 +17,7 @@ case class Scan(table: ql.TableID, projection: Seq[String]) extends LogicalPlan 
     }
   }
 
-  override def children(): FixedList[LogicalPlan] = List0()
+  override def children(): Seq[LogicalPlan] = Seq.empty
 }
 
 case class Project(fields: Seq[ql.FieldID], parent: LogicalPlan) extends LogicalPlan {
@@ -34,7 +33,7 @@ case class Project(fields: Seq[ql.FieldID], parent: LogicalPlan) extends Logical
     case _ => false
   }
 
-  override def children(): FixedList[LogicalPlan] = List1(parent)
+  override def children(): Seq[LogicalPlan] = Seq(parent)
 }
 
 case class Join(left: LogicalPlan, right: LogicalPlan) extends LogicalPlan {
@@ -51,7 +50,7 @@ case class Join(left: LogicalPlan, right: LogicalPlan) extends LogicalPlan {
     case _ => false
   }
 
-  override def children(): FixedList[LogicalPlan] = List2(left, right)
+  override def children(): Seq[LogicalPlan] = Seq(left, right)
 }
 
 object LogicalPlan {

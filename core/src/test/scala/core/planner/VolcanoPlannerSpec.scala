@@ -1,9 +1,9 @@
 package core.planner
 
+import core.planner.volcano.cost.{Cost, CostModel}
 import core.planner.volcano.stats.{StatsProvider, TableStats}
 import core.planner.volcano.{VolcanoPlanner, VolcanoPlannerContext}
 import core.ql.QueryParser
-import core.utils.visualization.MemoVizUtils.Mermaid
 import org.scalamock.scalatest.proxy.MockFactory
 import org.scalatest.flatspec.AnyFlatSpec
 
@@ -20,7 +20,7 @@ class VolcanoPlannerSpec extends AnyFlatSpec with MockFactory {
         |FROM
         | tbl1 JOIN tbl2 JOIN tbl3
         |""".stripMargin
-    val statsProvider = new StatsProvider {
+    val mockStatsProvider = new StatsProvider {
       override def tableStats(table: String): TableStats = {
         table match {
           case "tbl1" =>
@@ -60,14 +60,16 @@ class VolcanoPlannerSpec extends AnyFlatSpec with MockFactory {
         }
       }
     }
-    implicit val ctx: VolcanoPlannerContext = new VolcanoPlannerContext(statsProvider)
+    val mockCostModel = new CostModel {
+      override def isBetter(currentCost: Cost, newCost: Cost): Boolean = true
+    }
+    implicit val ctx: VolcanoPlannerContext = new VolcanoPlannerContext(mockStatsProvider, mockCostModel)
     val planner                             = new VolcanoPlanner
     QueryParser.parse(in) match {
       case Left(err) => fail(err)
       case Right(parsed) =>
         planner.initialize(parsed)
         planner.explore()
-        println(ctx.memo.showDiffMermaidViz(0, 2))
     }
   }
 }

@@ -14,7 +14,7 @@ class Memo(
   val groupExpressions: mutable.HashMap[LogicalPlan, GroupExpression] = mutable.HashMap[LogicalPlan, GroupExpression]()
 
   def getOrCreateGroupExpression(plan: LogicalPlan): GroupExpression = {
-    val children    = plan.children().values
+    val children    = plan.children()
     val childGroups = children.map(child => getOrCreateGroup(child))
     groupExpressions.get(plan) match {
       case Some(found) => found

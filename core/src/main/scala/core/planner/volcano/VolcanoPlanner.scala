@@ -3,9 +3,9 @@ package core.planner.volcano
 import core.execution.Operator
 import core.planner.Planner
 import core.planner.volcano.logicalplan.LogicalPlan
-import core.planner.volcano.memo.Group
-import core.planner.volcano.rules.TransformationRule
+import core.planner.volcano.memo.{Group, GroupImplementation}
 import core.planner.volcano.rules.transform.{ProjectionPushDown, X3TableJoinReorderBySize}
+import core.planner.volcano.rules.{ImplementationRule, TransformationRule}
 import core.ql.Statement
 
 class VolcanoPlanner extends Planner[VolcanoPlannerContext] {
@@ -19,13 +19,23 @@ class VolcanoPlanner extends Planner[VolcanoPlannerContext] {
     Seq(new X3TableJoinReorderBySize)
   )
 
+  // combined implementation rule, from all implementation rules
+  private val combinedImplementationRule: ImplementationRule = ImplementationRule.combined
+
   override def getPlan(expr: Statement)(implicit ctx: VolcanoPlannerContext): Operator = {
     initialize(expr)
     explore()
-    ???
+    implement()
+    ctx.rootGroup.implementation match {
+      case Some(implementation) => implementation.physicalPlan.operator()
+      case None                 => throw new Exception("No implementation found, something went wrong!")
+    }
   }
 
-  // initialization phase
+  /**
+    * Initialization phase
+    */
+
   def initialize(query: Statement)(implicit ctx: VolcanoPlannerContext): Unit = {
     ctx.query = query
     ctx.rootPlan = LogicalPlan.toPlan(ctx.query)
@@ -37,7 +47,10 @@ class VolcanoPlanner extends Planner[VolcanoPlannerContext] {
     ctx.memo.groupExpressions.values.foreach(_.explorationMark.markExplored(initialRound))
   }
 
-  // exploration phase
+  /**
+    * Exploration phase
+    */
+
   def explore()(implicit ctx: VolcanoPlannerContext): Unit = {
     for (r <- transformationRules.indices) {
       exploreGroup(ctx.rootGroup, transformationRules(r), r + 1)
@@ -45,9 +58,11 @@ class VolcanoPlanner extends Planner[VolcanoPlannerContext] {
   }
 
   //noinspection DuplicatedCode
-  private def exploreGroup(group: Group, rules: Seq[TransformationRule], round: Int)(
-    implicit ctx: VolcanoPlannerContext
-  ): Unit = {
+  private def exploreGroup(
+    group: Group,
+    rules: Seq[TransformationRule],
+    round: Int
+  )(implicit ctx: VolcanoPlannerContext): Unit = {
     while (!group.explorationMark.isExplored(round)) {
       group.explorationMark.markExplored(round)
       // explore all child groups
@@ -80,6 +95,57 @@ class VolcanoPlanner extends Planner[VolcanoPlannerContext] {
           group.explorationMark.markUnexplored(round)
         }
       }
+    }
+  }
+
+  /**
+    * Implementation phase
+    */
+  def implement()(implicit ctx: VolcanoPlannerContext): Unit = {
+    ctx.rootGroup.implementation = Option(implementGroup(ctx.rootGroup, combinedImplementationRule))
+  }
+
+  private def implementGroup(group: Group, combinedRule: ImplementationRule)(
+    implicit ctx: VolcanoPlannerContext
+  ): GroupImplementation = {
+    group.implementation match {
+      case Some(implementation) => implementation
+      case None =>
+        var bestImplementation = Option.empty[GroupImplementation]
+        group.equivalents.foreach { equivalent =>
+          val implementations = combinedRule.transform(equivalent)
+          val childPhysicalPlans = equivalent.children.map { child =>
+            val childImplementation = implementGroup(child, combinedRule)
+            child.implementation = Option(childImplementation)
+            childImplementation.physicalPlan
+          }
+          // calculate the implementation, and update the best cost for group
+          implementations.foreach { implementation =>
+            implementation.calculate(childPhysicalPlans)
+            val cost = implementation.cost()
+            bestImplementation match {
+              case Some(currentBest) =>
+                if (ctx.costModel.isBetter(currentBest.cost, cost)) {
+                  bestImplementation = Option(
+                    GroupImplementation(
+                      physicalPlan = implementation,
+                      cost = cost,
+                      selectedEquivalentExpression = equivalent
+                    )
+                  )
+                }
+              case None =>
+                bestImplementation = Option(
+                  GroupImplementation(
+                    physicalPlan = implementation,
+                    cost = cost,
+                    selectedEquivalentExpression = equivalent
+                  )
+                )
+            }
+          }
+        }
+        bestImplementation.get
     }
   }
 }

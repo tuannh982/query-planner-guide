@@ -7,7 +7,7 @@ object LogicalPlanVizUtils {
   implicit class Mermaid(plan: LogicalPlan) {
 
     private def getEdges(node: LogicalPlan): Seq[(LogicalPlan, LogicalPlan)] = {
-      val children   = node.children().values
+      val children   = node.children()
       val edges      = children.map(child => node -> child)
       val childEdges = children.flatMap(getEdges)
       edges ++ childEdges
