@@ -1,13 +1,14 @@
 package core.ql
 
-import utils.parser.Parser
+import core.ctx.QueryExecutionContext
+import utils.parser.ParserWithCtx
 
 import scala.util.Try
 import scala.util.parsing.combinator.RegexParsers
 
-object QueryParser extends Parser[Statement] with RegexParsers {
+object QueryParser extends ParserWithCtx[QueryExecutionContext, Statement] with RegexParsers {
 
-  override def parse(in: String): Either[Throwable, Statement] = {
+  override def parse(in: String)(implicit ctx: QueryExecutionContext): Either[Throwable, Statement] = {
     Try(parseAll(statement, in) match {
       case Success(result, _) => Right(result)
       case NoSuccess(msg, _)  => Left(new Exception(msg))

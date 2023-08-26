@@ -1,4 +1,4 @@
-package core.planner.logicalplan
+package core.planner.volcano.logicalplan
 
 import core.ql
 import utils.list.{FixedList, List0, List1, List2}
@@ -27,7 +27,7 @@ case class Project(fields: Seq[ql.FieldID], parent: LogicalPlan) extends Logical
 
   override def equals(other: Any): Boolean = other match {
     case that: Project =>
-      (that canEqual this) &&
+      that.canEqual(this) &&
         fields.sortBy(x => (x.table.id, x.id)) == that.fields.sortBy(x => (x.table.id, x.id)) &&
         parent == that.parent
     case _ => false
@@ -43,8 +43,10 @@ case class Join(left: LogicalPlan, right: LogicalPlan) extends LogicalPlan {
 
   override def equals(other: Any): Boolean = other match {
     case that: Join =>
-      (that canEqual this) &&
-        (left == that.left && right == that.right || left == that.right && right == that.left)
+      that.canEqual(this) && (
+        left == that.left && right == that.right ||
+          left == that.right && right == that.left
+      )
     case _ => false
   }
 
