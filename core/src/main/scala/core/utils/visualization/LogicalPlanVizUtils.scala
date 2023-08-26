@@ -13,7 +13,7 @@ object LogicalPlanVizUtils {
       edges ++ childEdges
     }
 
-    def getMermaidViz: String = {
+    def mermaidViz: String = {
       val sb    = new StringBuilder()
       val edges = getEdges(plan)
       val nodes = edges.flatMap { case (from, to) => Seq(from, to) }.distinct

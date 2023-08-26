@@ -1,13 +1,14 @@
 package core.planner.volcano.memo
 
 import core.planner.volcano.logicalplan.LogicalPlan
+import core.planner.volcano.rules.TransformationRule
 
 import scala.collection.mutable
 
 case class Group(
   id: Long,
   equivalents: mutable.HashSet[GroupExpression]
-) extends ExplorationMark {
+) {
   val explorationMark: ExplorationMark = new ExplorationMark
 
   override def canEqual(that: Any): Boolean = that.isInstanceOf[Group]
@@ -27,7 +28,8 @@ case class GroupExpression(
   plan: LogicalPlan,
   children: mutable.MutableList[Group]
 ) {
-  val explorationMark: ExplorationMark = new ExplorationMark
+  val explorationMark: ExplorationMark                            = new ExplorationMark
+  val appliedTransformations: mutable.HashSet[TransformationRule] = mutable.HashSet()
 
   override def canEqual(that: Any): Boolean = that.isInstanceOf[GroupExpression]
 

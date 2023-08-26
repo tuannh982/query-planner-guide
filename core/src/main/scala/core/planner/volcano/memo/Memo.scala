@@ -21,13 +21,13 @@ class Memo(
       case None =>
         val id       = groupExpressionIdGenerator.generate()
         val children = mutable.MutableList() ++ childGroups
-        val expr = GroupExpression(
+        val expression = GroupExpression(
           id = id,
           plan = plan,
           children = children
         )
-        groupExpressions += plan -> expr
-        expr
+        groupExpressions += plan -> expression
+        expression
     }
   }
 
