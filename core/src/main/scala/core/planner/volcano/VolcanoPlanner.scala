@@ -1,26 +1,25 @@
 package core.planner.volcano
 
-import core.ctx.QueryExecutionContext
 import core.execution.Operator
 import core.planner.Planner
 import core.planner.volcano.logicalplan.LogicalPlan
 import core.planner.volcano.memo.Group
 import core.planner.volcano.rules.TransformationRule
-import core.planner.volcano.rules.transform.ProjectionPushDown
+import core.planner.volcano.rules.transform.{ProjectionPushDown, X3TableJoinReorderBySize}
 import core.ql.Statement
 
-class VolcanoPlanner extends Planner {
+class VolcanoPlanner extends Planner[VolcanoPlannerContext] {
 
   // round
   private val initialRound = 0
 
   // multi-stage transformation
   private val transformationRules: Seq[Seq[TransformationRule]] = Seq(
-    Seq(new ProjectionPushDown)
+    Seq(new ProjectionPushDown),
+    Seq(new X3TableJoinReorderBySize)
   )
 
-  override def getPlan(expr: Statement)(implicit ctx: QueryExecutionContext): Operator = {
-    implicit val plannerCtx: VolcanoPlannerContext = new VolcanoPlannerContext(ctx)
+  override def getPlan(expr: Statement)(implicit ctx: VolcanoPlannerContext): Operator = {
     initialize(expr)
     explore()
     ???

@@ -4,6 +4,6 @@ import core.ctx.QueryExecutionContext
 import core.execution.Operator
 import core.ql.Statement
 
-trait Planner {
-  def getPlan(expr: Statement)(implicit ctx: QueryExecutionContext): Operator
+trait Planner[C <: QueryExecutionContext] {
+  def getPlan(expr: Statement)(implicit ctx: C): Operator
 }
