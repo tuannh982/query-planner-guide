@@ -1,4 +1,4 @@
-package core.planner.volcano.stats
+package core.stats
 
 case class TableStats(
   estimatedRowCount: Long,

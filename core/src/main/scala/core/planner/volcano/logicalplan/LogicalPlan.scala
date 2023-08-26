@@ -20,7 +20,7 @@ case class Scan(table: ql.TableID, projection: Seq[String]) extends LogicalPlan 
   override def children(): Seq[LogicalPlan] = Seq.empty
 }
 
-case class Project(fields: Seq[ql.FieldID], parent: LogicalPlan) extends LogicalPlan {
+case class Project(fields: Seq[ql.FieldID], child: LogicalPlan) extends LogicalPlan {
   override def describe(): String = s"PROJECT ${fields.map(f => s"${f.table.id}.${f.id}").mkString(", ")}"
 
   override def canEqual(other: Any): Boolean = other.isInstanceOf[Project]
@@ -29,11 +29,11 @@ case class Project(fields: Seq[ql.FieldID], parent: LogicalPlan) extends Logical
     case that: Project =>
       that.canEqual(this) &&
         fields.sortBy(x => (x.table.id, x.id)) == that.fields.sortBy(x => (x.table.id, x.id)) &&
-        parent == that.parent
+        child == that.child
     case _ => false
   }
 
-  override def children(): Seq[LogicalPlan] = Seq(parent)
+  override def children(): Seq[LogicalPlan] = Seq(child)
 }
 
 case class Join(left: LogicalPlan, right: LogicalPlan) extends LogicalPlan {

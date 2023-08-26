@@ -4,7 +4,6 @@ import core.execution.Operator
 import core.planner.Planner
 import core.planner.volcano.logicalplan.LogicalPlan
 import core.planner.volcano.memo.{Group, GroupImplementation}
-import core.planner.volcano.rules.transform.{ProjectionPushDown, X3TableJoinReorderBySize}
 import core.planner.volcano.rules.{ImplementationRule, TransformationRule}
 import core.ql.Statement
 
@@ -12,13 +11,8 @@ class VolcanoPlanner extends Planner[VolcanoPlannerContext] {
 
   // round
   private val initialRound = 0
-
   // multi-stage transformation
-  private val transformationRules: Seq[Seq[TransformationRule]] = Seq(
-    Seq(new ProjectionPushDown),
-    Seq(new X3TableJoinReorderBySize)
-  )
-
+  private val transformationRules: Seq[Seq[TransformationRule]] = TransformationRule.ruleBatches
   // combined implementation rule, from all implementation rules
   private val combinedImplementationRule: ImplementationRule = ImplementationRule.combined
 
@@ -113,22 +107,22 @@ class VolcanoPlanner extends Planner[VolcanoPlannerContext] {
       case None =>
         var bestImplementation = Option.empty[GroupImplementation]
         group.equivalents.foreach { equivalent =>
-          val implementations = combinedRule.transform(equivalent)
+          val physicalPlanBuilders = combinedRule.physicalPlanBuilders(equivalent)
           val childPhysicalPlans = equivalent.children.map { child =>
             val childImplementation = implementGroup(child, combinedRule)
             child.implementation = Option(childImplementation)
             childImplementation.physicalPlan
           }
           // calculate the implementation, and update the best cost for group
-          implementations.foreach { implementation =>
-            implementation.calculate(childPhysicalPlans)
-            val cost = implementation.cost()
+          physicalPlanBuilders.foreach { builder =>
+            val physicalPlan = builder.build(childPhysicalPlans)
+            val cost         = physicalPlan.cost()
             bestImplementation match {
               case Some(currentBest) =>
                 if (ctx.costModel.isBetter(currentBest.cost, cost)) {
                   bestImplementation = Option(
                     GroupImplementation(
-                      physicalPlan = implementation,
+                      physicalPlan = physicalPlan,
                       cost = cost,
                       selectedEquivalentExpression = equivalent
                     )
@@ -137,7 +131,7 @@ class VolcanoPlanner extends Planner[VolcanoPlannerContext] {
               case None =>
                 bestImplementation = Option(
                   GroupImplementation(
-                    physicalPlan = implementation,
+                    physicalPlan = physicalPlan,
                     cost = cost,
                     selectedEquivalentExpression = equivalent
                   )

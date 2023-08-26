@@ -1,6 +1,6 @@
 package core.planner.volcano.physicalplan
 
 case class Estimations(
-  estimatedRowCount: Long,
+  estimatedLoopIterations: Long,
   estimatedRowSize: Long
 )

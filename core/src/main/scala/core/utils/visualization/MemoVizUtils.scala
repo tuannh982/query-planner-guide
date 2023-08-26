@@ -18,7 +18,7 @@ object MemoVizUtils {
     // visualize the different in half-interval (`afterRound`, `toRound`]
     // including added nodes & added connections
     // `afterRound` must always smaller than `toRound`
-    def showDiffMermaidViz(afterRound: Int, toRound: Int): String = {
+    def showExplorationDiffMermaidViz(afterRound: Int, toRound: Int): String = {
       if (afterRound >= toRound) {
         throw new Exception(s"afterRound($afterRound) must always smaller than toRound($toRound)")
       }
@@ -53,6 +53,30 @@ object MemoVizUtils {
       }
       newLinks.foreach { newLink =>
         sb.append(s"  linkStyle $newLink stroke-width: 4px, stroke: orange\n")
+      }
+      sb.toString()
+    }
+
+    def showBestPhysicalPlanMermaidViz(group: Group): String = {
+      val sb = new StringBuilder()
+      sb.append("graph TD\n")
+      val queue = new mutable.Queue[Group]()
+      queue.enqueue(group)
+      while (queue.nonEmpty) {
+        val group              = queue.dequeue()
+        val implementation     = group.implementation.get // all the implementation must be presented
+        val selectedExpression = implementation.selectedEquivalentExpression
+        val children           = selectedExpression.children
+        sb.append(s"""  Group#${group.id}["\n""")
+        sb.append(s"    Group #${group.id}\n")
+        sb.append(s"      Selected: ${selectedExpression.plan.describe()}\n")
+        sb.append(s"      Implementation: ${implementation.physicalPlan.operator().getClass.getSimpleName}\n")
+        sb.append(s"      Cost: ${implementation.cost}\n")
+        sb.append(s"""  "]\n""")
+        children.foreach { child =>
+          sb.append(s"""  Group#${group.id} --> Group#${child.id}\n""")
+          queue.enqueue(child)
+        }
       }
       sb.toString()
     }

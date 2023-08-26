@@ -13,8 +13,8 @@ class ProjectionPushDown extends TransformationRule {
   override def `match`(expression: GroupExpression)(implicit ctx: VolcanoPlannerContext): Boolean = {
     val plan = expression.plan
     plan match {
-      case Project(_, parent) => check(parent)
-      case _                  => false
+      case Project(_, child) => check(child)
+      case _                 => false
     }
   }
 
@@ -29,7 +29,7 @@ class ProjectionPushDown extends TransformationRule {
 
   override def transform(expression: GroupExpression)(implicit ctx: VolcanoPlannerContext): GroupExpression = {
     val plan    = expression.plan.asInstanceOf[Project]
-    val newPlan = Project(AllFields, pushDown(plan.fields, plan.parent))
+    val newPlan = Project(AllFields, pushDown(plan.fields, plan.child))
     ctx.memo.getOrCreateGroupExpression(newPlan)
   }
 
