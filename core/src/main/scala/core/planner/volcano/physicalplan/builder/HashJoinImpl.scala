@@ -11,7 +11,7 @@ class HashJoinImpl extends PhysicalPlanBuilder {
   }
 
   //noinspection ZeroIndexToHead,DuplicatedCode
-  override def build(children: Seq[PhysicalPlan]): PhysicalPlan = {
+  override def build(children: Seq[PhysicalPlan]): Option[PhysicalPlan] = {
     // reorder the child nodes, the left child is the child with smaller view size (smaller than the right child if we're store all of them in memory)
     val (leftChild, rightChild) = if (viewSize(children(0)) < viewSize(children(1))) {
       (children(0), children(1))
@@ -42,12 +42,20 @@ class HashJoinImpl extends PhysicalPlanBuilder {
       estimatedMemoryCost = selfCost.estimatedMemoryCost + childCosts.estimatedMemoryCost,
       estimatedTimeCost = selfCost.estimatedTimeCost + childCosts.estimatedTimeCost
     )
-    Join(
-      operator = HashJoinOperator(leftChild.operator(), rightChild.operator()),
-      leftChild = leftChild,
-      rightChild = rightChild,
-      cost = cost,
-      estimations = estimations
+    Some(
+      Join(
+        operator = HashJoinOperator(
+          leftChild.operator(),
+          rightChild.operator(),
+          Seq("id"), // hard-coded join field
+          Seq("id")  // hard-coded join field
+        ),
+        leftChild = leftChild,
+        rightChild = rightChild,
+        cost = cost,
+        estimations = estimations,
+        traits = Set.empty // don't inherit trait from children since we're hash join
+      )
     )
   }
 }

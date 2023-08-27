@@ -1,13 +1,25 @@
 package core.planner.volcano.physicalplan.builder
 
+import core.catalog.TableCatalog
+import core.ctx.Connection
 import core.execution.NormalScanOperator
 import core.planner.volcano.cost.Cost
 import core.planner.volcano.physicalplan.{Estimations, PhysicalPlan, PhysicalPlanBuilder, Scan}
 import core.stats.TableStats
 
-class NormalScanImpl(tableName: String, tableStats: TableStats, projection: Seq[String]) extends PhysicalPlanBuilder {
+import scala.collection.mutable
 
-  override def build(children: Seq[PhysicalPlan]): PhysicalPlan = {
+class NormalScanImpl(
+  connection: Connection,
+  tableName: String,
+  tableCatalog: TableCatalog,
+  tableStats: TableStats,
+  projection: Seq[String]
+) extends PhysicalPlanBuilder {
+
+  private val log2: Double = math.log(2)
+
+  override def build(children: Seq[PhysicalPlan]): Option[PhysicalPlan] = {
     val isNoProjection = projection.isEmpty || projection.head == "*"
     val (projectionCpuCostModifier, projectionMemoryCostModifier) = if (isNoProjection) {
       (1.0, 1.0)
@@ -26,10 +38,19 @@ class NormalScanImpl(tableName: String, tableStats: TableStats, projection: Seq[
       estimatedLoopIterations = tableStats.estimatedRowCount,
       estimatedRowSize = tableStats.avgRowSize
     )
-    Scan(
-      operator = NormalScanOperator(tableName, projection),
-      cost = cost,
-      estimations = estimations
+    // populate traits
+    val traits = mutable.ListBuffer[String]()
+    tableCatalog.metadata.get("sorted") match {
+      case Some(value) if value == "true" => traits += "SORTED"
+      case _                              => (): Unit
+    }
+    Some(
+      Scan(
+        operator = NormalScanOperator(connection, tableName, tableCatalog, projection),
+        cost = cost,
+        estimations = estimations,
+        traits = traits.toSet
+      )
     )
   }
 }

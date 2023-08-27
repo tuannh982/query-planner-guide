@@ -7,11 +7,18 @@ import core.planner.volcano.{logicalplan, VolcanoPlannerContext}
 object Scan {
 
   def apply(node: logicalplan.Scan)(implicit ctx: VolcanoPlannerContext): Seq[PhysicalPlanBuilder] = {
-    val tableName  = node.table.id
-    val tableStats = ctx.statsProvider.tableStats(node.table.id)
-    val projection = node.projection
+    val tableName    = node.table.id
+    val tableCatalog = ctx.tableCatalogProvider.catalog(tableName)
+    val tableStats   = ctx.statsProvider.tableStats(tableName)
+    val projection   = node.projection
     Seq(
-      new NormalScanImpl(tableName, tableStats, projection)
+      new NormalScanImpl(
+        ctx.connection,
+        tableName,
+        tableCatalog,
+        tableStats,
+        projection
+      )
     )
   }
 }

@@ -114,9 +114,8 @@ class VolcanoPlanner extends Planner[VolcanoPlannerContext] {
             childImplementation.physicalPlan
           }
           // calculate the implementation, and update the best cost for group
-          physicalPlanBuilders.foreach { builder =>
-            val physicalPlan = builder.build(childPhysicalPlans)
-            val cost         = physicalPlan.cost()
+          physicalPlanBuilders.flatMap(_.build(childPhysicalPlans)).foreach { physicalPlan =>
+            val cost = physicalPlan.cost()
             bestImplementation match {
               case Some(currentBest) =>
                 if (ctx.costModel.isBetter(currentBest.cost, cost)) {

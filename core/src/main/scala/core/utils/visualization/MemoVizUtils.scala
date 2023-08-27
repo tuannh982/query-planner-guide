@@ -70,7 +70,10 @@ object MemoVizUtils {
         sb.append(s"""  Group#${group.id}["\n""")
         sb.append(s"    Group #${group.id}\n")
         sb.append(s"      Selected: ${selectedExpression.plan.describe()}\n")
-        sb.append(s"      Implementation: ${implementation.physicalPlan.operator().getClass.getSimpleName}\n")
+        sb.append(s"      Operator: ${implementation.physicalPlan.operator().getClass.getSimpleName}\n")
+        if (implementation.physicalPlan.traits().nonEmpty) {
+          sb.append(s"      Traits: ${implementation.physicalPlan.traits().mkString(", ")}\n")
+        }
         sb.append(s"      Cost: ${implementation.cost}\n")
         sb.append(s"""  "]\n""")
         children.foreach { child =>

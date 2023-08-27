@@ -1,6 +1,7 @@
 package core.planner
 
 import core.catalog.{TableCatalog, TableCatalogProvider}
+import core.ctx.Connection
 import core.planner.volcano.cost.{Cost, CostModel}
 import core.planner.volcano.{VolcanoPlanner, VolcanoPlannerContext}
 import core.ql.QueryParser
@@ -21,37 +22,43 @@ class VolcanoPlannerSpec extends AnyFlatSpec with MockFactory {
         |FROM
         | tbl1 JOIN tbl2 JOIN tbl3
         |""".stripMargin
+    val mockConnection = new Connection {
+      override def fetchNextRow(table: String): Seq[Any] = Seq.empty // just mock
+    }
     val mockTableCatalogProvider = new TableCatalogProvider {
       override def catalog(table: String): TableCatalog = table match {
         case "tbl1" =>
           TableCatalog(
-            Map(
+            Seq(
               "id"     -> classOf[String],
               "field1" -> classOf[BigInt],
               "field2" -> classOf[BigDecimal],
               "field3" -> classOf[String],
               "field4" -> classOf[String]
-            )
+            ),
+            metadata = Map("sorted" -> "false")
           )
         case "tbl2" =>
           TableCatalog(
-            Map(
+            Seq(
               "id"     -> classOf[String],
               "field1" -> classOf[BigInt],
               "field2" -> classOf[BigDecimal],
               "field3" -> classOf[String],
               "field4" -> classOf[String]
-            )
+            ),
+            metadata = Map("sorted" -> "true")
           )
         case "tbl3" =>
           TableCatalog(
-            Map(
+            Seq(
               "id"     -> classOf[String],
               "field1" -> classOf[BigInt],
               "field2" -> classOf[BigDecimal],
               "field3" -> classOf[String],
               "field4" -> classOf[String]
-            )
+            ),
+            metadata = Map("sorted" -> "true")
           )
         case _ => throw new Exception("unrecognized table name")
       }
@@ -98,18 +105,11 @@ class VolcanoPlannerSpec extends AnyFlatSpec with MockFactory {
     }
     val mockCostModel = new CostModel {
       override def isBetter(currentCost: Cost, newCost: Cost): Boolean = {
-        if (currentCost.estimatedMemoryCost == newCost.estimatedMemoryCost) {
-          if (currentCost.estimatedCpuCost == newCost.estimatedCpuCost) {
-            currentCost.estimatedTimeCost > newCost.estimatedTimeCost
-          } else {
-            currentCost.estimatedCpuCost > newCost.estimatedCpuCost
-          }
-        } else {
-          currentCost.estimatedMemoryCost > newCost.estimatedMemoryCost
-        }
+        currentCost.estimatedCpuCost > newCost.estimatedCpuCost
       }
     }
     implicit val ctx: VolcanoPlannerContext = new VolcanoPlannerContext(
+      mockConnection,
       mockTableCatalogProvider,
       mockStatsProvider,
       mockCostModel
@@ -118,10 +118,109 @@ class VolcanoPlannerSpec extends AnyFlatSpec with MockFactory {
     QueryParser.parse(in) match {
       case Left(err) => fail(err)
       case Right(parsed) =>
-        planner.getPlan(parsed)
         planner.initialize(parsed)
         planner.explore()
         planner.implement()
+//        println(ctx.memo.showExplorationDiffMermaidViz(0, 1))
+//        println(ctx.memo.showBestPhysicalPlanMermaidViz(ctx.rootGroup))
+    }
+  }
+
+  it should "correctly execute without error" in {
+    val in =
+      """
+        |SELECT
+        | tbl1.id, tbl1.field1,
+        | tbl2.id, tbl2.field1, tbl2.field2,
+        | tbl3.id, tbl3.field2, tbl3.field2
+        |FROM
+        | tbl1 JOIN tbl2 JOIN tbl3
+        |""".stripMargin
+    val defaultTableCatalog = TableCatalog(
+      Seq("id" -> classOf[String], "field1" -> classOf[String], "field2" -> classOf[String]),
+      metadata = Map("sorted" -> "true") // all table are sorted
+    ) // all table will have the same spec
+    val defaultTableStats = TableStats(
+      estimatedRowCount = 3,
+      avgColumnSize = Map("id" -> 10, "field1" -> 10, "field2" -> 10)
+    ) // all table will have the same stats
+    val mockTableCatalogProvider = new TableCatalogProvider {
+      override def catalog(table: String): TableCatalog = defaultTableCatalog
+    }
+    val mockStatsProvider = new StatsProvider {
+      override def tableStats(table: String): TableStats = defaultTableStats
+    }
+    val mockCostModel = new CostModel {
+      override def isBetter(currentCost: Cost, newCost: Cost): Boolean = {
+        currentCost.estimatedCpuCost > newCost.estimatedCpuCost
+      }
+    }
+    val mockConnection: Connection = new Connection {
+      val tbl1Data: Seq[Seq[Any]] = Seq(
+        Seq("1", "1A", "1a"),
+        Seq("1", "1B", "1b"),
+        Seq("3", "1C", "1c")
+      )
+
+      val tbl2Data: Seq[Seq[Any]] = Seq(
+        Seq("1", "2A", "2a"),
+        Seq("1", "2B", "2b"),
+        Seq("3", "2C", "2c")
+      )
+
+      val tbl3Data: Seq[Seq[Any]] = Seq(
+        Seq("1", "3A", "3a"),
+        Seq("2", "3B", "3b"),
+        Seq("3", "3C", "3c")
+      )
+
+      var tbl1Idx = 0
+      var tbl2Idx = 0
+      var tbl3Idx = 0
+
+      override def fetchNextRow(table: String): Seq[Any] = table match {
+        case "tbl1" =>
+          if (tbl1Idx < tbl1Data.size) {
+            val row = tbl1Data(tbl1Idx)
+            tbl1Idx += 1
+            row
+          } else {
+            null
+          }
+        case "tbl2" =>
+          if (tbl2Idx < tbl2Data.size) {
+            val row = tbl2Data(tbl2Idx)
+            tbl2Idx += 1
+            row
+          } else {
+            null
+          }
+        case "tbl3" =>
+          if (tbl3Idx < tbl3Data.size) {
+            val row = tbl3Data(tbl3Idx)
+            tbl3Idx += 1
+            row
+          } else {
+            null
+          }
+        case _ => throw new Exception("unrecognized table name")
+      }
+    }
+    implicit val ctx: VolcanoPlannerContext = new VolcanoPlannerContext(
+      mockConnection,
+      mockTableCatalogProvider,
+      mockStatsProvider,
+      mockCostModel
+    )
+    val planner = new VolcanoPlanner
+    QueryParser.parse(in) match {
+      case Left(err) => fail(err)
+      case Right(parsed) =>
+        val operator      = planner.getPlan(parsed)
+        var row: Seq[Any] = null
+        while ({ row = operator.next(); row != null }) {
+          println(row)
+        }
     }
   }
 }

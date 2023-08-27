@@ -8,7 +8,7 @@ object Project {
 
   def apply(node: logicalplan.Project)(implicit ctx: VolcanoPlannerContext): Seq[PhysicalPlanBuilder] = {
     Seq(
-      new ProjectionImpl
+      new ProjectionImpl(node.fields)
     )
   }
 }

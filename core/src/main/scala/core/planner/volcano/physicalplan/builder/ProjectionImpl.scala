@@ -3,10 +3,11 @@ package core.planner.volcano.physicalplan.builder
 import core.execution.ProjectOperator
 import core.planner.volcano.cost.Cost
 import core.planner.volcano.physicalplan.{Estimations, PhysicalPlan, PhysicalPlanBuilder, Project}
+import core.ql
 
-class ProjectionImpl extends PhysicalPlanBuilder {
+class ProjectionImpl(projection: Seq[ql.FieldID]) extends PhysicalPlanBuilder {
 
-  override def build(children: Seq[PhysicalPlan]): PhysicalPlan = {
+  override def build(children: Seq[PhysicalPlan]): Option[PhysicalPlan] = {
     val child = children.head
     val selfCost = Cost(
       estimatedCpuCost = 0,
@@ -20,13 +21,16 @@ class ProjectionImpl extends PhysicalPlanBuilder {
     )
     val estimations = Estimations(
       estimatedLoopIterations = child.estimations().estimatedLoopIterations,
-      estimatedRowSize = child.estimations().estimatedRowSize // just guess
+      estimatedRowSize = child.estimations().estimatedRowSize // just guessing the value
     )
-    Project(
-      operator = ProjectOperator(child.operator()),
-      child = child,
-      cost = cost,
-      estimations = estimations
+    Some(
+      Project(
+        operator = ProjectOperator(projection, child.operator()),
+        child = child,
+        cost = cost,
+        estimations = estimations,
+        traits = child.traits()
+      )
     )
   }
 }

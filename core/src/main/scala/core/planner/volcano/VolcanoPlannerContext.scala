@@ -1,7 +1,7 @@
 package core.planner.volcano
 
 import core.catalog.TableCatalogProvider
-import core.ctx.QueryExecutionContext
+import core.ctx.{Connection, QueryExecutionContext}
 import core.planner.volcano.cost.CostModel
 import core.planner.volcano.logicalplan.LogicalPlan
 import core.planner.volcano.memo.{Group, Memo}
@@ -9,6 +9,7 @@ import core.ql
 import core.stats.StatsProvider
 
 class VolcanoPlannerContext(
+  val connection: Connection,
   val tableCatalogProvider: TableCatalogProvider,
   val statsProvider: StatsProvider,
   val costModel: CostModel

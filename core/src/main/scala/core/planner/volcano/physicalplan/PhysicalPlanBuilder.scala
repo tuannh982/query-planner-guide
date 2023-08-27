@@ -1,5 +1,5 @@
 package core.planner.volcano.physicalplan
 
 trait PhysicalPlanBuilder {
-  def build(children: Seq[PhysicalPlan]): PhysicalPlan
+  def build(children: Seq[PhysicalPlan]): Option[PhysicalPlan]
 }

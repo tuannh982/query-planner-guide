@@ -1,6 +1,6 @@
 package core.planner.logicalplan
 
-import core.ctx.QueryExecutionContext
+import core.ctx.{Connection, QueryExecutionContext}
 import core.planner.volcano.logicalplan.{Join, LogicalPlan, Project, Scan}
 import core.ql
 import core.ql.{FieldID, QueryParser}
@@ -20,7 +20,12 @@ class LogicalPlanSpec extends AnyFlatSpec with MockFactory {
         |FROM
         | tbl1 JOIN tbl2 JOIN tbl3
         |""".stripMargin
-    implicit val ctx: QueryExecutionContext = new QueryExecutionContext
+    val mockConnection = new Connection {
+      override def fetchNextRow(table: String): Seq[Any] = Seq.empty // just mock
+    }
+    implicit val ctx: QueryExecutionContext = new QueryExecutionContext {
+      override def connection: Connection = mockConnection
+    }
     QueryParser.parse(in) match {
       case Left(err) => fail(err)
       case Right(parsed) =>
