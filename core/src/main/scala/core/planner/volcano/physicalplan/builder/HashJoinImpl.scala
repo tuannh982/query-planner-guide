@@ -4,7 +4,7 @@ import core.execution.HashJoinOperator
 import core.planner.volcano.cost.Cost
 import core.planner.volcano.physicalplan.{Estimations, Join, PhysicalPlan, PhysicalPlanBuilder}
 
-class HashJoinImpl extends PhysicalPlanBuilder {
+class HashJoinImpl(leftFields: Seq[String], rightFields: Seq[String]) extends PhysicalPlanBuilder {
 
   private def viewSize(plan: PhysicalPlan): Long = {
     plan.estimations().estimatedLoopIterations * plan.estimations().estimatedRowSize
@@ -47,8 +47,8 @@ class HashJoinImpl extends PhysicalPlanBuilder {
         operator = HashJoinOperator(
           leftChild.operator(),
           rightChild.operator(),
-          Seq("id"), // hard-coded join field
-          Seq("id")  // hard-coded join field
+          leftFields,
+          rightFields
         ),
         leftChild = leftChild,
         rightChild = rightChild,

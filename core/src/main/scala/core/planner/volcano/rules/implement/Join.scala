@@ -7,9 +7,11 @@ import core.planner.volcano.{VolcanoPlannerContext, logicalplan}
 object Join {
 
   def apply(node: logicalplan.Join)(implicit ctx: VolcanoPlannerContext): Seq[PhysicalPlanBuilder] = {
+    val leftFields  = node.on.map(_._1).map(f => s"${f.table.id}.${f.id}")
+    val rightFields = node.on.map(_._2).map(f => s"${f.table.id}.${f.id}")
     Seq(
-      new HashJoinImpl,
-      new MergeJoinImpl
+      new HashJoinImpl(leftFields, rightFields),
+      new MergeJoinImpl(leftFields, rightFields)
     )
   }
 }

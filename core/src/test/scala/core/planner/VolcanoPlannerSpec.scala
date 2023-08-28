@@ -9,6 +9,8 @@ import core.stats.{StatsProvider, TableStats}
 import org.scalamock.scalatest.proxy.MockFactory
 import org.scalatest.flatspec.AnyFlatSpec
 
+import scala.collection.mutable
+
 class VolcanoPlannerSpec extends AnyFlatSpec with MockFactory {
   behavior of "VolcanoPlanner"
 
@@ -20,10 +22,12 @@ class VolcanoPlannerSpec extends AnyFlatSpec with MockFactory {
         | tbl2.id, tbl2.field1, tbl2.field2,
         | tbl3.id, tbl3.field2, tbl3.field2
         |FROM
-        | tbl1 JOIN tbl2 JOIN tbl3
+        | tbl1
+        | JOIN tbl2 ON tbl1.id = tbl2.id
+        | JOIN tbl3 ON tbl2.id = tbl3.id
         |""".stripMargin
     val mockConnection = new Connection {
-      override def fetchNextRow(table: String): Seq[Any] = Seq.empty // just mock
+      override def fetchNextRow(table: String, projection: Seq[String]): Seq[Any] = Seq.empty // just mock
     }
     val mockTableCatalogProvider = new TableCatalogProvider {
       override def catalog(table: String): TableCatalog = table match {
@@ -131,10 +135,12 @@ class VolcanoPlannerSpec extends AnyFlatSpec with MockFactory {
       """
         |SELECT
         | tbl1.id, tbl1.field1,
-        | tbl2.id, tbl2.field1, tbl2.field2,
+        | tbl2.field1, tbl2.field2,
         | tbl3.id, tbl3.field2, tbl3.field2
         |FROM
-        | tbl1 JOIN tbl2 JOIN tbl3
+        | tbl1
+        | JOIN tbl2 ON tbl1.id = tbl2.id
+        | JOIN tbl3 ON tbl2.id = tbl3.id
         |""".stripMargin
     val defaultTableCatalog = TableCatalog(
       Seq("id" -> classOf[String], "field1" -> classOf[String], "field2" -> classOf[String]),
@@ -178,12 +184,41 @@ class VolcanoPlannerSpec extends AnyFlatSpec with MockFactory {
       var tbl2Idx = 0
       var tbl3Idx = 0
 
-      override def fetchNextRow(table: String): Seq[Any] = table match {
+      val columnIndices: Seq[(String, Int)] = Seq(
+        "id"     -> 0,
+        "field1" -> 1,
+        "field2" -> 2
+      )
+
+      private def project(projection: Seq[String], table: String, row: Seq[Any]): Seq[Any] = {
+        if (projection.length == 1 && (projection.head == "*" || projection.head == "*.*")) {
+          row
+        } else {
+          val indices = projection.map { p =>
+            columnIndices.find {
+              case (field, i) =>
+                val pSplit = p.split('.')
+                if (pSplit.length == 2) {
+                  p == s"$table.$field"
+                } else {
+                  p == field
+                }
+            }.get
+          }.map(_._2)
+          val projected = mutable.ListBuffer[Any]()
+          indices.foreach { i =>
+            projected += row(i)
+          }
+          projected
+        }
+      }
+
+      override def fetchNextRow(table: String, projection: Seq[String]): Seq[Any] = table match {
         case "tbl1" =>
           if (tbl1Idx < tbl1Data.size) {
             val row = tbl1Data(tbl1Idx)
             tbl1Idx += 1
-            row
+            project(projection, table, row)
           } else {
             null
           }
@@ -191,7 +226,7 @@ class VolcanoPlannerSpec extends AnyFlatSpec with MockFactory {
           if (tbl2Idx < tbl2Data.size) {
             val row = tbl2Data(tbl2Idx)
             tbl2Idx += 1
-            row
+            project(projection, table, row)
           } else {
             null
           }
@@ -199,7 +234,7 @@ class VolcanoPlannerSpec extends AnyFlatSpec with MockFactory {
           if (tbl3Idx < tbl3Data.size) {
             val row = tbl3Data(tbl3Idx)
             tbl3Idx += 1
-            row
+            project(projection, table, row)
           } else {
             null
           }
@@ -218,6 +253,7 @@ class VolcanoPlannerSpec extends AnyFlatSpec with MockFactory {
       case Right(parsed) =>
         val operator      = planner.getPlan(parsed)
         var row: Seq[Any] = null
+        println(operator.aliases())
         while ({ row = operator.next(); row != null }) {
           println(row)
         }

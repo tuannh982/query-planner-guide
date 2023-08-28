@@ -18,10 +18,12 @@ class LogicalPlanSpec extends AnyFlatSpec with MockFactory {
         | tbl2.id, tbl2.field1, tbl2.field2,
         | tbl3.id, tbl3.field2, tbl3.field2
         |FROM
-        | tbl1 JOIN tbl2 JOIN tbl3
+        | tbl1
+        | JOIN tbl2 ON tbl1.id = tbl2.id
+        | JOIN tbl3 ON tbl2.id = tbl3.id
         |""".stripMargin
     val mockConnection = new Connection {
-      override def fetchNextRow(table: String): Seq[Any] = Seq.empty // just mock
+      override def fetchNextRow(table: String, projection: Seq[String]): Seq[Any] = Seq.empty // just mock
     }
     implicit val ctx: QueryExecutionContext = new QueryExecutionContext {
       override def connection: Connection = mockConnection
@@ -46,7 +48,13 @@ class LogicalPlanSpec extends AnyFlatSpec with MockFactory {
               Scan(ql.TableID("tbl1"), Seq.empty),
               Join(
                 Scan(ql.TableID("tbl2"), Seq.empty),
-                Scan(ql.TableID("tbl3"), Seq.empty)
+                Scan(ql.TableID("tbl3"), Seq.empty),
+                Seq(
+                  FieldID(ql.TableID("tbl2"), "id") -> FieldID(ql.TableID("tbl3"), "id"),
+                )
+              ),
+              Seq(
+                FieldID(ql.TableID("tbl1"), "id") -> FieldID(ql.TableID("tbl2"), "id"),
               )
             )
           )

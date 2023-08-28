@@ -4,7 +4,7 @@ import core.execution.MergeJoinOperator
 import core.planner.volcano.cost.Cost
 import core.planner.volcano.physicalplan.{Estimations, Join, PhysicalPlan, PhysicalPlanBuilder}
 
-class MergeJoinImpl extends PhysicalPlanBuilder {
+class MergeJoinImpl(leftFields: Seq[String], rightFields: Seq[String]) extends PhysicalPlanBuilder {
 
   //noinspection ZeroIndexToHead,DuplicatedCode
   override def build(children: Seq[PhysicalPlan]): Option[PhysicalPlan] = {
@@ -42,8 +42,8 @@ class MergeJoinImpl extends PhysicalPlanBuilder {
           operator = MergeJoinOperator(
             leftChild.operator(),
             rightChild.operator(),
-            Seq("id"), // hard-coded join field
-            Seq("id")  // hard-coded join field
+            leftFields,
+            rightFields
           ),
           leftChild = leftChild,
           rightChild = rightChild,

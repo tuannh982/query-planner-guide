@@ -11,32 +11,6 @@ trait Operator {
   def next(): Seq[Any]
 }
 
-object Operator {
-
-  def buildProjectionIndices(fields: Seq[String], projection: Seq[String]): Set[Int] = {
-    val indexed = fields.zipWithIndex
-    if (projection.length == 1 && (projection.head == "*" || projection.head == "*.*")) {
-      indexed.map(_._2).toSet
-    } else {
-      projection.map { p =>
-        indexed.find {
-          case (field, i) =>
-            val split = field.split('.')
-            if (split.length == 2) {
-              p == field || p == split(1)
-            } else {
-              p == field
-            }
-        }.get
-      }.map(_._2).toSet
-    }
-  }
-
-  def project(row: Seq[Any], indices: Set[Int]): Seq[Any] = {
-    row.zipWithIndex.filter(v => indices.contains(v._2)).map(_._1)
-  }
-}
-
 case class NormalScanOperator(
   connection: Connection,
   table: String,
@@ -57,23 +31,25 @@ case class NormalScanOperator(
   }
 
   override def next(): Seq[Any] = {
-    val nextRow = connection.fetchNextRow(table)
+    val nextRow = connection.fetchNextRow(table, projection)
     if (nextRow == null) {
       return null
     }
-    val projectionIndices = projection.map(tableCatalog.fieldIndex).toSet // ignore any lookup error here
-    val projected         = Operator.project(nextRow, projectionIndices)
-    projected
+    nextRow
   }
 }
 
 case class ProjectOperator(projection: Seq[ql.FieldID], child: Operator) extends Operator {
 
-  private lazy val projectionIndices: Set[Int] = Operator.buildProjectionIndices(child.aliases(), aliases())
+  private val projectionIndices: Seq[Int] = Utils.buildProjectionIndices(child.aliases(), aliases())
 
   override def aliases(): Seq[String] = {
-    projection.map { field =>
-      s"${field.table.id}.${field.id}"
+    if (projection.length == 1 && (projection.head.table.id == "*" && projection.head.id == "*")) {
+      child.aliases()
+    } else {
+      projection.map { field =>
+        s"${field.table.id}.${field.id}"
+      }
     }
   }
 
@@ -82,7 +58,7 @@ case class ProjectOperator(projection: Seq[ql.FieldID], child: Operator) extends
     if (nextRow == null) {
       return null
     }
-    val projected = Operator.project(nextRow, projectionIndices)
+    val projected = Utils.project(nextRow, projectionIndices)
     projected
   }
 }
@@ -98,35 +74,26 @@ case class MergeJoinOperator(
   private var prevLeft: Seq[Any]          = _
   private var prevRight: Seq[Any]         = _
 
-  private val leftProjectionIndices: Set[Int] = Operator.buildProjectionIndices(
+  private val leftProjectionIndices: Seq[Int] = Utils.buildProjectionIndices(
     leftChild.aliases(),
     leftChildJoinFields
   )
 
-  private val rightProjectionIndices: Set[Int] = Operator.buildProjectionIndices(
+  private val rightProjectionIndices: Seq[Int] = Utils.buildProjectionIndices(
     rightChild.aliases(),
     rightChildJoinFields
   )
-
-  private def compare(left: Seq[Any], right: Seq[Any]): Int = {
-    val leftProject  = Operator.project(left, leftProjectionIndices)
-    val rightProject = Operator.project(right, rightProjectionIndices)
-    val leftK        = leftProject.map(_.toString).mkString("")
-    val rightK       = rightProject.map(_.toString).mkString("")
-    leftK.compareTo(rightK)
-  }
-
   override def aliases(): Seq[String] = leftChild.aliases() ++ rightChild.aliases()
 
   private def checkAndCompare(left: Seq[Any], right: Seq[Any], dir: Int = 0): Boolean = {
     val base = left != null && right != null
     if (!base) return false
     if (dir == 0) {
-      compare(left, right) == 0
+      Utils.compare(left, right, leftProjectionIndices, rightProjectionIndices) == 0
     } else if (dir < 0) {
-      compare(left, right) < 0
+      Utils.compare(left, right, leftProjectionIndices, rightProjectionIndices) < 0
     } else {
-      compare(left, right) > 0
+      Utils.compare(left, right, leftProjectionIndices, rightProjectionIndices) > 0
     }
   }
 
@@ -154,13 +121,10 @@ case class MergeJoinOperator(
         rightBufferedRows += currentRight
         currentRight = rightChild.next()
       }
-      val cross = for {
+      bufferedRows = for {
         l <- leftBufferedRows
         r <- rightBufferedRows
-      } yield (l, r)
-      bufferedRows = cross.map {
-        case (l, r) => l ++ r
-      }
+      } yield l ++ r
       prevLeft = currentLeft
       prevRight = currentRight
     }

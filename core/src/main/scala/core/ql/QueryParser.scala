@@ -42,21 +42,28 @@ object QueryParser extends ParserWithCtx[QueryExecutionContext, Statement] with 
   private def fromSource: Parser[Statement] = table ||| subQuery
 
   private def select: Parser[Select] =
-    "SELECT" ~ rep1sep(fieldId, ",") ~ "FROM" ~ fromSource ~ rep("JOIN" ~ fromSource) ^^ {
+    "SELECT" ~ rep1sep(fieldId, ",") ~ "FROM" ~ fromSource ~ rep(
+      "JOIN" ~ fromSource ~ "ON" ~ rep1(fieldId ~ "=" ~ fieldId)
+    ) ^^ {
       case _ ~ fields ~ _ ~ src ~ joins =>
         val p = if (joins.nonEmpty) {
-          def chain(left: Statement, right: Seq[Statement]): Join = {
+          def chain(left: Statement, right: Seq[(Statement, Seq[(FieldID, FieldID)])]): Join = {
             if (right.isEmpty) {
               throw new Exception("should never happen")
             } else if (right.length == 1) {
               val next = right.head
-              Join(left, next)
+              Join(left, next._1, next._2)
             } else {
               val next = right.head
-              Join(left, chain(next, right.tail))
+              Join(left, chain(next._1, right.tail), next._2)
             }
           }
-          chain(src, joins.map(join => join._2))
+          val temp = joins.map { join =>
+            val statement = join._1._1._2
+            val joinOn    = join._2.map(on => on._1._1 -> on._2)
+            statement -> joinOn
+          }
+          chain(src, temp)
         } else {
           src
         }

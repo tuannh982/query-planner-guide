@@ -36,7 +36,7 @@ case class Project(fields: Seq[ql.FieldID], child: LogicalPlan) extends LogicalP
   override def children(): Seq[LogicalPlan] = Seq(child)
 }
 
-case class Join(left: LogicalPlan, right: LogicalPlan) extends LogicalPlan {
+case class Join(left: LogicalPlan, right: LogicalPlan, on: Seq[(ql.FieldID, ql.FieldID)]) extends LogicalPlan {
   override def describe(): String = "JOIN"
 
   override def canEqual(that: Any): Boolean = that.isInstanceOf[Join]
@@ -57,9 +57,9 @@ object LogicalPlan {
 
   def toPlan(node: ql.Statement): LogicalPlan = {
     node match {
-      case ql.Table(table)         => Scan(table, Seq.empty)
-      case ql.Join(left, right)    => Join(toPlan(left), toPlan(right))
-      case ql.Select(fields, from) => Project(fields, toPlan(from))
+      case ql.Table(table)          => Scan(table, Seq.empty)
+      case ql.Join(left, right, on) => Join(toPlan(left), toPlan(right), on)
+      case ql.Select(fields, from)  => Project(fields, toPlan(from))
     }
   }
 }

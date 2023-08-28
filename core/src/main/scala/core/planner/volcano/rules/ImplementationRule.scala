@@ -19,7 +19,7 @@ object ImplementationRule {
       expression.plan match {
         case node @ Scan(_, _)    => implement.Scan(node)
         case node @ Project(_, _) => implement.Project(node)
-        case node @ Join(_, _)    => implement.Join(node)
+        case node @ Join(_, _, _) => implement.Join(node)
       }
     }
   }

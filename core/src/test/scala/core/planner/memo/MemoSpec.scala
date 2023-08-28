@@ -28,7 +28,13 @@ class MemoSpec extends AnyFlatSpec with MockFactory {
         Scan(ql.TableID("tbl1"), Seq.empty),
         Join(
           Scan(ql.TableID("tbl2"), Seq.empty),
-          Scan(ql.TableID("tbl3"), Seq.empty)
+          Scan(ql.TableID("tbl3"), Seq.empty),
+          Seq(
+            FieldID(ql.TableID("tbl2"), "id") -> FieldID(ql.TableID("tbl3"), "id"),
+          )
+        ),
+        Seq(
+          FieldID(ql.TableID("tbl1"), "id") -> FieldID(ql.TableID("tbl2"), "id"),
         )
       )
     )
@@ -51,7 +57,13 @@ class MemoSpec extends AnyFlatSpec with MockFactory {
                       Scan(ql.TableID("tbl1"), Seq.empty),
                       Join(
                         Scan(ql.TableID("tbl2"), Seq.empty),
-                        Scan(ql.TableID("tbl3"), Seq.empty)
+                        Scan(ql.TableID("tbl3"), Seq.empty),
+                        Seq(
+                          FieldID(ql.TableID("tbl2"), "id") -> FieldID(ql.TableID("tbl3"), "id"),
+                        )
+                      ),
+                      Seq(
+                        FieldID(ql.TableID("tbl1"), "id") -> FieldID(ql.TableID("tbl2"), "id"),
                       )
                     ),
                     mutable.MutableList(
@@ -68,7 +80,10 @@ class MemoSpec extends AnyFlatSpec with MockFactory {
                             0,
                             Join(
                               Scan(ql.TableID("tbl2"), Seq.empty),
-                              Scan(ql.TableID("tbl3"), Seq.empty)
+                              Scan(ql.TableID("tbl3"), Seq.empty),
+                              Seq(
+                                FieldID(ql.TableID("tbl2"), "id") -> FieldID(ql.TableID("tbl3"), "id"),
+                              )
                             ),
                             mutable.MutableList(
                               Group(
