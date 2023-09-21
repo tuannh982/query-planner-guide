@@ -27,7 +27,7 @@ class VolcanoPlannerSpec extends AnyFlatSpec with MockFactory {
         | JOIN tbl3 ON tbl2.id = tbl3.id
         |""".stripMargin
     val mockConnection = new Connection {
-      override def fetchNextRow(table: String, projection: Seq[String]): Seq[Any] = Seq.empty // just mock
+      override def fetchNextRow(table: String, projection: Seq[String]): Option[Seq[Any]] = None // just mock
     }
     val mockTableCatalogProvider = new TableCatalogProvider {
       override def catalog(table: String): TableCatalog = table match {
@@ -213,30 +213,30 @@ class VolcanoPlannerSpec extends AnyFlatSpec with MockFactory {
         }
       }
 
-      override def fetchNextRow(table: String, projection: Seq[String]): Seq[Any] = table match {
+      override def fetchNextRow(table: String, projection: Seq[String]): Option[Seq[Any]] = table match {
         case "tbl1" =>
           if (tbl1Idx < tbl1Data.size) {
             val row = tbl1Data(tbl1Idx)
             tbl1Idx += 1
-            project(projection, table, row)
+            Option(project(projection, table, row))
           } else {
-            null
+            None
           }
         case "tbl2" =>
           if (tbl2Idx < tbl2Data.size) {
             val row = tbl2Data(tbl2Idx)
             tbl2Idx += 1
-            project(projection, table, row)
+            Option(project(projection, table, row))
           } else {
-            null
+            None
           }
         case "tbl3" =>
           if (tbl3Idx < tbl3Data.size) {
             val row = tbl3Data(tbl3Idx)
             tbl3Idx += 1
-            project(projection, table, row)
+            Option(project(projection, table, row))
           } else {
-            null
+            None
           }
         case _ => throw new Exception("unrecognized table name")
       }
@@ -252,9 +252,9 @@ class VolcanoPlannerSpec extends AnyFlatSpec with MockFactory {
       case Left(err) => fail(err)
       case Right(parsed) =>
         val operator      = planner.getPlan(parsed)
-        var row: Seq[Any] = null
+        var row: Option[Seq[Any]] = None
         println(operator.aliases())
-        while ({ row = operator.next(); row != null }) {
+        while ({ row = operator.next(); row.isDefined }) {
           println(row)
         }
     }

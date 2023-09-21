@@ -20,7 +20,7 @@ class QueryParserSpec extends AnyFlatSpec with MockFactory {
         | JOIN tbl3 ON tbl2.id = tbl3.id
         |""".stripMargin
     val mockConnection = new Connection {
-      override def fetchNextRow(table: String, projection: Seq[String]): Seq[Any] = Seq.empty // just mock
+      override def fetchNextRow(table: String, projection: Seq[String]): Option[Seq[Any]] = None // just mock
     }
     implicit val ctx: QueryExecutionContext = new QueryExecutionContext {
       override def connection: Connection = mockConnection

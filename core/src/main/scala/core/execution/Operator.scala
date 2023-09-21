@@ -8,7 +8,7 @@ import scala.collection.mutable
 
 trait Operator {
   def aliases(): Seq[String]
-  def next(): Seq[Any]
+  def next(): Option[Seq[Any]]
 }
 
 case class NormalScanOperator(
@@ -30,12 +30,8 @@ case class NormalScanOperator(
     }
   }
 
-  override def next(): Seq[Any] = {
-    val nextRow = connection.fetchNextRow(table, projection)
-    if (nextRow == null) {
-      return null
-    }
-    nextRow
+  override def next(): Option[Seq[Any]] = {
+    connection.fetchNextRow(table, projection)
   }
 }
 
@@ -53,13 +49,8 @@ case class ProjectOperator(projection: Seq[ql.FieldID], child: Operator) extends
     }
   }
 
-  override def next(): Seq[Any] = {
-    val nextRow = child.next()
-    if (nextRow == null) {
-      return null
-    }
-    val projected = Utils.project(nextRow, projectionIndices)
-    projected
+  override def next(): Option[Seq[Any]] = {
+    child.next().map(Utils.project(_, projectionIndices))
   }
 }
 
@@ -71,8 +62,8 @@ case class MergeJoinOperator(
 ) extends Operator {
   private var end                         = false
   private var bufferedRows: Seq[Seq[Any]] = Seq.empty
-  private var prevLeft: Seq[Any]          = _
-  private var prevRight: Seq[Any]         = _
+  private var prevLeft: Option[Seq[Any]]  = None
+  private var prevRight: Option[Seq[Any]] = None
 
   private val leftProjectionIndices: Seq[Int] = Utils.buildProjectionIndices(
     leftChild.aliases(),
@@ -85,27 +76,29 @@ case class MergeJoinOperator(
   )
   override def aliases(): Seq[String] = leftChild.aliases() ++ rightChild.aliases()
 
-  private def checkAndCompare(left: Seq[Any], right: Seq[Any], dir: Int = 0): Boolean = {
-    val base = left != null && right != null
-    if (!base) return false
-    if (dir == 0) {
-      Utils.compare(left, right, leftProjectionIndices, rightProjectionIndices) == 0
-    } else if (dir < 0) {
-      Utils.compare(left, right, leftProjectionIndices, rightProjectionIndices) < 0
-    } else {
-      Utils.compare(left, right, leftProjectionIndices, rightProjectionIndices) > 0
+  private def checkAndCompare(left: Option[Seq[Any]], right: Option[Seq[Any]], dir: Int = 0): Boolean = {
+    (left, right) match {
+      case (Some(left), Some(right)) =>
+        if (dir == 0) {
+          Utils.compare(left, right, leftProjectionIndices, rightProjectionIndices) == 0
+        } else if (dir < 0) {
+          Utils.compare(left, right, leftProjectionIndices, rightProjectionIndices) < 0
+        } else {
+          Utils.compare(left, right, leftProjectionIndices, rightProjectionIndices) > 0
+        }
+      case _ => false
     }
   }
 
-  override def next(): Seq[Any] = {
+  override def next(): Option[Seq[Any]] = {
     while (!end && bufferedRows.isEmpty) {
       var currentLeft  = prevLeft
       var currentRight = prevRight
-      if (currentLeft == null) currentLeft = leftChild.next()
-      if (currentRight == null) currentRight = rightChild.next()
-      if (currentLeft == null || currentRight == null) {
+      if (currentLeft.isEmpty) currentLeft = leftChild.next()
+      if (currentRight.isEmpty) currentRight = rightChild.next()
+      if (currentLeft.isEmpty || currentRight.isEmpty) {
         end = true
-        return null
+        return None
       }
       while (checkAndCompare(currentLeft, currentRight, -1)) currentLeft = leftChild.next()
       while (checkAndCompare(currentLeft, currentRight, 1)) currentRight = rightChild.next()
@@ -114,11 +107,11 @@ case class MergeJoinOperator(
       val leftBufferedRows: mutable.ListBuffer[Seq[Any]]  = mutable.ListBuffer()
       val rightBufferedRows: mutable.ListBuffer[Seq[Any]] = mutable.ListBuffer()
       while (checkAndCompare(currentLeft, rightAnchor)) {
-        leftBufferedRows += currentLeft
+        currentLeft.foreach(row => leftBufferedRows += row)
         currentLeft = leftChild.next()
       }
       while (checkAndCompare(leftAnchor, currentRight)) {
-        rightBufferedRows += currentRight
+        currentRight.foreach(row => rightBufferedRows += row)
         currentRight = rightChild.next()
       }
       bufferedRows = for {
@@ -131,10 +124,10 @@ case class MergeJoinOperator(
     if (bufferedRows.nonEmpty) {
       val row = bufferedRows.head
       bufferedRows = bufferedRows.tail
-      row
+      Option(row)
     } else {
       end = true
-      null
+      None
     }
   }
 }
@@ -147,7 +140,7 @@ case class HashJoinOperator(
 ) extends Operator {
   override def aliases(): Seq[String] = leftChild.aliases() ++ rightChild.aliases()
 
-  override def next(): Seq[Any] = {
+  override def next(): Option[Seq[Any]] = {
     ??? // left unimplemented since it's just a demo project
   }
 }
