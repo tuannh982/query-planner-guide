@@ -6,6 +6,7 @@ import core.planner.volcano.cost.{Cost, CostModel}
 import core.planner.volcano.{VolcanoPlanner, VolcanoPlannerContext}
 import core.ql.QueryParser
 import core.stats.{StatsProvider, TableStats}
+import core.utils.visualization.MemoVizUtils.Mermaid
 import org.scalamock.scalatest.proxy.MockFactory
 import org.scalatest.flatspec.AnyFlatSpec
 
@@ -125,8 +126,9 @@ class VolcanoPlannerSpec extends AnyFlatSpec with MockFactory {
         planner.initialize(parsed)
         planner.explore()
         planner.implement()
-//        println(ctx.memo.showExplorationDiffMermaidViz(0, 1))
-//        println(ctx.memo.showBestPhysicalPlanMermaidViz(ctx.rootGroup))
+//        println(ctx.rootPlan.mermaidViz)
+//        println(ctx.memo.showExplorationDiffMermaidViz(-1, 2))
+        println(ctx.memo.showBestPhysicalPlanMermaidViz(ctx.rootGroup))
     }
   }
 
@@ -251,7 +253,7 @@ class VolcanoPlannerSpec extends AnyFlatSpec with MockFactory {
     QueryParser.parse(in) match {
       case Left(err) => fail(err)
       case Right(parsed) =>
-        val operator      = planner.getPlan(parsed)
+        val operator              = planner.getPlan(parsed)
         var row: Option[Seq[Any]] = None
         println(operator.aliases())
         while ({ row = operator.next(); row.isDefined }) {
