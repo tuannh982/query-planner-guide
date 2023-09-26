@@ -208,17 +208,6 @@ graph TD
     end
     Expr#12 --> Group#11
     Expr#6 --> Group#5
-    style Expr#12 stroke-width: 4px, stroke: orange
-    style Expr#8 stroke-width: 4px, stroke: orange
-    style Expr#10 stroke-width: 4px, stroke: orange
-    style Expr#9 stroke-width: 4px, stroke: orange
-    style Expr#11 stroke-width: 4px, stroke: orange
-    style Expr#7 stroke-width: 4px, stroke: orange
-    linkStyle 0 stroke-width: 4px, stroke: orange
-    linkStyle 1 stroke-width: 4px, stroke: orange
-    linkStyle 6 stroke-width: 4px, stroke: orange
-    linkStyle 7 stroke-width: 4px, stroke: orange
-    linkStyle 8 stroke-width: 4px, stroke: orange
 ```
 
 Here we can see `Group#6` is having 2 equivalent expressions, which are both representing the same query (one is doing
@@ -355,40 +344,6 @@ graph TD
     end
     Expr#12 --> Group#11
     Expr#6 --> Group#5
-    style Expr#3 stroke-width: 4px, stroke: orange
-    style Expr#12 stroke-width: 4px, stroke: orange
-    style Expr#4 stroke-width: 4px, stroke: orange
-    style Expr#13 stroke-width: 4px, stroke: orange
-    style Expr#5 stroke-width: 4px, stroke: orange
-    style Expr#14 stroke-width: 4px, stroke: orange
-    style Expr#6 stroke-width: 4px, stroke: orange
-    style Expr#15 stroke-width: 4px, stroke: orange
-    style Expr#7 stroke-width: 4px, stroke: orange
-    style Expr#16 stroke-width: 4px, stroke: orange
-    style Expr#1 stroke-width: 4px, stroke: orange
-    style Expr#8 stroke-width: 4px, stroke: orange
-    style Expr#10 stroke-width: 4px, stroke: orange
-    style Expr#2 stroke-width: 4px, stroke: orange
-    style Expr#9 stroke-width: 4px, stroke: orange
-    style Expr#11 stroke-width: 4px, stroke: orange
-    linkStyle 0 stroke-width: 4px, stroke: orange
-    linkStyle 15 stroke-width: 4px, stroke: orange
-    linkStyle 9 stroke-width: 4px, stroke: orange
-    linkStyle 1 stroke-width: 4px, stroke: orange
-    linkStyle 16 stroke-width: 4px, stroke: orange
-    linkStyle 2 stroke-width: 4px, stroke: orange
-    linkStyle 17 stroke-width: 4px, stroke: orange
-    linkStyle 3 stroke-width: 4px, stroke: orange
-    linkStyle 10 stroke-width: 4px, stroke: orange
-    linkStyle 4 stroke-width: 4px, stroke: orange
-    linkStyle 11 stroke-width: 4px, stroke: orange
-    linkStyle 12 stroke-width: 4px, stroke: orange
-    linkStyle 13 stroke-width: 4px, stroke: orange
-    linkStyle 5 stroke-width: 4px, stroke: orange
-    linkStyle 6 stroke-width: 4px, stroke: orange
-    linkStyle 7 stroke-width: 4px, stroke: orange
-    linkStyle 14 stroke-width: 4px, stroke: orange
-    linkStyle 8 stroke-width: 4px, stroke: orange
 ```
 
 Here we can see that projection pushdown rule and join reorder rule are applied.
@@ -772,13 +727,154 @@ def toPlan(node: ql.Statement): LogicalPlan = {
 }
 ```
 
-See [LogicalPlan.scala](core%2Fsrc%2Fmain%2Fscala%2Fcore%2Fplanner%2Fvolcano%2Flogicalplan%2FLogicalPlan.scala) for full implementation
+See [LogicalPlan.scala](core%2Fsrc%2Fmain%2Fscala%2Fcore%2Fplanner%2Fvolcano%2Flogicalplan%2FLogicalPlan.scala) for full
+implementation
 
 ### The equivalent groups
 
 #### Group
 
+We can define classes for Group as following:
+
+```scala
+case class Group(
+                  id: Long,
+                  equivalents: mutable.HashSet[GroupExpression]
+                ) {
+  val explorationMark: ExplorationMark = new ExplorationMark
+  var implementation: Option[GroupImplementation] = None
+}
+
+case class GroupExpression(
+                            id: Long,
+                            plan: LogicalPlan,
+                            children: mutable.MutableList[Group]
+                          ) {
+  val explorationMark: ExplorationMark = new ExplorationMark
+  val appliedTransformations: mutable.HashSet[TransformationRule] = mutable.HashSet()
+}
+
+```
+
+`Group` is the set of plans which are logically equivalent.
+
+Each `GroupExpression` represents a logical plan node. Since we've defined a logical plan node will have a list of child
+nodes (in the previous section), and the `GroupExpression` represents a logical plan node, and the `Group` represents a
+set of equivalent plans, so the children of `GroupExpression` is a list of `Group`
+
+e.g.
+
+```mermaid
+graph TD
+    subgraph Group#8
+        Expr#8
+    end
+    subgraph Group#2
+        Expr#2
+    end
+    subgraph Group#11
+        Expr#11
+    end
+    Expr#11 --> Group#7
+    Expr#11 --> Group#10
+    subgraph Group#5
+        Expr#5
+    end
+    Expr#5 --> Group#1
+    Expr#5 --> Group#4
+    subgraph Group#4
+        Expr#4
+    end
+    Expr#4 --> Group#2
+    Expr#4 --> Group#3
+    subgraph Group#7
+        Expr#7
+    end
+    subgraph Group#1
+        Expr#1
+    end
+    subgraph Group#10
+        Expr#10
+    end
+    Expr#10 --> Group#8
+    Expr#10 --> Group#9
+    subgraph Group#9
+        Expr#9
+    end
+    subgraph Group#3
+        Expr#3
+    end
+    subgraph Group#6
+        Expr#12
+        Expr#6
+    end
+    Expr#12 --> Group#11
+    Expr#6 --> Group#5
+```
+
+As we can see here, the `Group#6` has 2 equivalent expressions: `Expr#12` and `Expr#6`, and the children of `Expr#12`
+is `Group#11`
+
 #### Memo
+
+Memo is a bunch of helpers to help constructing the equivalent groups. Memo is consists of several hashmap to cache the
+group and group expression and methods to register new group or group expression.
+
+```scala
+class Memo(
+            groupIdGenerator: Generator[Long] = new LongGenerator,
+            groupExpressionIdGenerator: Generator[Long] = new LongGenerator
+          ) {
+  val groups: mutable.HashMap[Long, Group] = mutable.HashMap[Long, Group]()
+  val parents: mutable.HashMap[Long, Group] = mutable.HashMap[Long, Group]() // lookup group from group expression ID
+  val groupExpressions: mutable.HashMap[LogicalPlan, GroupExpression] = mutable.HashMap[LogicalPlan, GroupExpression]()
+
+  def getOrCreateGroupExpression(plan: LogicalPlan): GroupExpression = {
+    val children = plan.children()
+    val childGroups = children.map(child => getOrCreateGroup(child))
+    groupExpressions.get(plan) match {
+      case Some(found) => found
+      case None =>
+        val id = groupExpressionIdGenerator.generate()
+        val children = mutable.MutableList() ++ childGroups
+        val expression = GroupExpression(
+          id = id,
+          plan = plan,
+          children = children
+        )
+        groupExpressions += plan -> expression
+        expression
+    }
+  }
+
+  def getOrCreateGroup(plan: LogicalPlan): Group = {
+    val exprGroup = getOrCreateGroupExpression(plan)
+    val group = parents.get(exprGroup.id) match {
+      case Some(group) =>
+        group.equivalents += exprGroup
+        group
+      case None =>
+        val id = groupIdGenerator.generate()
+        val equivalents = mutable.HashSet() + exprGroup
+        val group = Group(
+          id = id,
+          equivalents = equivalents
+        )
+        groups.put(id, group)
+        group
+    }
+    parents += exprGroup.id -> group
+    group
+  }
+}
+
+```
+
+See [Memo.scala](core%2Fsrc%2Fmain%2Fscala%2Fcore%2Fplanner%2Fvolcano%2Fmemo%2FMemo.scala) for full implementation
+
+### Initialization
+
+#### The root group
 
 ### Exploration phase
 
