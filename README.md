@@ -1710,7 +1710,59 @@ See [VolcanoPlanner.scala](core%2Fsrc%2Fmain%2Fscala%2Fcore%2Fplanner%2Fvolcano%
 
 ### Optimization phase
 
-#### More plan enumerations
+After exploration phase, we now have a fully expanded tree containing all possible plans, now is the optimization phase.
+
+In this phase, we will find the best plan for our root group. The optimization process is described as following:
+
+- For each group, we will find the best implementation by choosing the group expressing with the lowest cost
+- For each group expression, first we will enumerate the physical implementations from the logical plan. Then for each
+  physical implementation, we will calculate its cost using its child group costs.
+
+Here is an example
+
+```mermaid
+graph TD
+    subgraph Group#2["Group#2(cost=1)"]
+        Expr#2["Expr#2(cost=1)"]
+    end
+    subgraph Group#5["Group#5(cost=3)"]
+        Expr#5["Expr#5(cost=max(3,2)=3"]
+    end
+    Expr#5 --> Group#1
+    Expr#5 --> Group#4
+    subgraph Group#4["Group#4(cost=2)"]
+        Expr#4["Expr#4(cost=max(1,2)=2)"]
+        Expr#7["Expr#7(cost=1+2=3)"]
+    end
+    Expr#4 --> Group#2
+    Expr#4 --> Group#3
+    subgraph Group#1["Group#1(cost=3)"]
+        Expr#1["Expr#1(cost=3)"]
+    end
+    subgraph Group#3["Group#3(cost=2)"]
+        Expr#3["Expr#3(cost=2)"]
+    end
+    subgraph Group#6["Group#6(cost=4.5)"]
+        Expr#6["Expr#6(cost=3*1.5=4.5)"]
+    end
+    Expr#6 --> Group#5
+    subgraph Group#8["Group#8(cost=1)"]
+        Expr#8["Expr#8(cost=1)"]
+    end
+    subgraph Group#9["Group#9(cost=2)"]
+        Expr#9["Expr#9(cost=2)"]
+    end
+    Expr#7 --> Group#8
+    Expr#7 --> Group#9
+```
+
+for example, the `Expr#4` cost is calculated by its child group costs (`Group#2` and `Group#3`) using `max` function.
+Another example, is the `Group#4`, its cost is calculated by calculating the min value between the costs of its
+equivalent expressions.
+
+#### Implementation rule
+
+#### Plan enumerations
 
 #### Estimating the cost
 
