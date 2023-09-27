@@ -815,10 +815,35 @@ graph TD
 As we can see here, the `Group#6` has 2 equivalent expressions: `Expr#12` and `Expr#6`, and the children of `Expr#12`
 is `Group#11`
 
+**notes:** We will implement multiple round transformation in the exploration phase, so for each `Group`
+and `GroupExpression`, we have
+a `ExplorationMark` indication the exploration status.
+
+```scala
+class ExplorationMark {
+  private var bits: Long = 0
+
+  def get: Long = bits
+
+  def isExplored(round: Int): Boolean = BitUtils.getBit(bits, round)
+
+  def markExplored(round: Int): Unit = bits = BitUtils.setBit(bits, round, on = true)
+
+  def markUnexplored(round: Int): Unit = bits = BitUtils.setBit(bits, round, on = false)
+}
+
+```
+
+`ExplorationMark` is just a bitset wrapper class, it will mark i-th bit as 1 if i-th round is explored, mark as 0
+otherwise.
+
+`ExplorationMark` can also be used to visualize the exact transformation,
+see [visualization](core%2Fsrc%2Fmain%2Fscala%2Fcore%2Futils%2Fvisualization) for more details
+
 #### Memo
 
 Memo is a bunch of helpers to help constructing the equivalent groups. Memo is consists of several hashmap to cache the
-group and group expression and methods to register new group or group expression.
+group and group expression, also provide methods to register new group or group expression.
 
 ```scala
 class Memo(
@@ -874,15 +899,461 @@ See [Memo.scala](core%2Fsrc%2Fmain%2Fscala%2Fcore%2Fplanner%2Fvolcano%2Fmemo%2FM
 
 ### Initialization
 
-#### The root group
+The first step inside the planner, is initialization
+
+```mermaid
+graph LR
+    query((query))
+    ast((ast))
+    root_plan((rootPlan))
+    root_group((rootGroup))
+    query -- " QueryParser.parse(query) " --> ast
+    ast -- " LogicalPlan.toPlan(ast) " --> root_plan
+    root_plan -- " memo.getOrCreateGroup(rootPlan) " --> root_group
+```
+
+First, query will be parsed into AST. Then converted to logical plan, called `root plan`, then initialize the group
+from `root plan`, called `root group`.
+
+```scala
+def initialize(query: Statement)(implicit ctx: VolcanoPlannerContext): Unit = {
+  ctx.query = query
+  ctx.rootPlan = LogicalPlan.toPlan(ctx.query)
+  ctx.rootGroup = ctx.memo.getOrCreateGroup(ctx.rootPlan)
+  // assuming this is first the exploration round,
+  // by marking the initialRound(0) as explored,
+  // it will be easier to visualize the different between rounds (added nodes, add connections)
+  ctx.memo.groups.values.foreach(_.explorationMark.markExplored(initialRound))
+  ctx.memo.groupExpressions.values.foreach(_.explorationMark.markExplored(initialRound))
+}
+```
+
+See [VolcanoPlanner.scala](core%2Fsrc%2Fmain%2Fscala%2Fcore%2Fplanner%2Fvolcano%2FVolcanoPlanner.scala) for more details
+
+For example, the query:
+
+```sql
+SELECT tbl1.id,
+       tbl1.field1,
+       tbl2.id,
+       tbl2.field1,
+       tbl2.field2,
+       tbl3.id,
+       tbl3.field2,
+       tbl3.field2
+FROM tbl1
+         JOIN tbl2 ON tbl1.id = tbl2.id
+         JOIN tbl3 ON tbl2.id = tbl3.id
+```
+
+after initialization, the groups will be looked like this:
+
+```mermaid
+graph TD
+    subgraph Group#2
+        Expr#2["SCAN tbl2"]
+    end
+    subgraph Group#5
+        Expr#5["JOIN"]
+    end
+    Expr#5 --> Group#1
+    Expr#5 --> Group#4
+    subgraph Group#4
+        Expr#4["JOIN"]
+    end
+    Expr#4 --> Group#2
+    Expr#4 --> Group#3
+    subgraph Group#1
+        Expr#1["SCAN tbl1"]
+    end
+    subgraph Group#3
+        Expr#3["SCAN tbl3"]
+    end
+    subgraph Group#6
+        Expr#6["PROJECT tbl1.id, tbl1.field1, tbl2.id, tbl2.field1, tbl2.field2, tbl3.id, tbl3.field2, tbl3.field2"]
+    end
+    Expr#6 --> Group#5
+```
+
+Here you can see that, every group has exactly one equivalent expression
 
 ### Exploration phase
 
+After initialization, now is the exploration phase, which will explore all possible equivalent plans.
+
+The exploration method is quite simple:
+
+- For each group, apply transformation rules to find all equivalent group expression and add to equivalent set until we
+  couldn't find any new equivalent plan
+- For each group expression, explore all child groups
+
 #### Transformation rule
+
+Before diving into exploration code, lets talk about transformation rule first.
+
+Transformation rule is a rule used to transform a logical plan to another equivalent logical plan if it's matched the
+rule condition.
+
+Here is the interface of transformation rule:
+
+```scala
+trait TransformationRule {
+  def `match`(expression: GroupExpression)(implicit ctx: VolcanoPlannerContext): Boolean
+
+  def transform(expression: GroupExpression)(implicit ctx: VolcanoPlannerContext): GroupExpression
+}
+
+```
+
+Since the logical plan is a tree-like datastructure, so the `match` implementation of transformation rules is pattern
+matching on tree.
+
+For example, here is the `match` that is used to match the PROJECT node while also check if it's descendants containing
+JOIN and SCAN only:
+
+```scala
+override def `match`(expression: GroupExpression)(implicit ctx: VolcanoPlannerContext): Boolean = {
+  val plan = expression.plan
+  plan match {
+    case Project(_, child) => check(child)
+    case _ => false
+  }
+}
+
+// check if the tree only contains SCAN and JOIN nodes
+private def check(node: LogicalPlan): Boolean = {
+  node match {
+    case Scan(_, _) => true
+    case Join(left, right, _) => check(left) && check(right)
+    case _ => false
+  }
+}
+```
+
+This plan is "matched":
+
+```mermaid
+graph TD
+    subgraph Group#2
+        Expr#2["SCAN"]
+    end
+    subgraph Group#5
+        Expr#5["JOIN"]
+    end
+    Expr#5 --> Group#1
+    Expr#5 --> Group#4
+    subgraph Group#4
+        Expr#4["JOIN"]
+    end
+    Expr#4 --> Group#2
+    Expr#4 --> Group#3
+    subgraph Group#1
+        Expr#1["SCAN"]
+    end
+    subgraph Group#3
+        Expr#3["SCAN"]
+    end
+    subgraph Group#6
+        Expr#6["PROJECT"]
+    end
+    Expr#6 --> Group#5
+```
+
+While this plan is not:
+
+```mermaid
+graph TD
+    subgraph Group#2
+        Expr#2["SCAN"]
+    end
+    subgraph Group#5
+        Expr#5["JOIN"]
+    end
+    Expr#5 --> Group#3
+    Expr#5 --> Group#4
+    subgraph Group#4
+        Expr#4["SCAN"]
+    end
+    subgraph Group#7
+        Expr#7["PROJECT"]
+    end
+    Expr#7 --> Group#6
+    subgraph Group#1
+        Expr#1["SCAN"]
+    end
+    subgraph Group#3
+        Expr#3["PROJECT"]
+    end
+    Expr#3 --> Group#2
+    subgraph Group#6
+        Expr#6["JOIN"]
+    end
+    Expr#6 --> Group#1
+    Expr#6 --> Group#5
+```
 
 #### Plan enumerations
 
-#### Visualize our transformations
+As we've said before, the exploration method is:
+
+- For each group, apply transformation rules to find all equivalent group expression and add to equivalent set until we
+  couldn't find any new equivalent plan
+- For each group expression, explore all child groups
+
+And here is exploration code (quite simple, huh):
+
+```scala
+private def exploreGroup(
+                          group: Group,
+                          rules: Seq[TransformationRule],
+                          round: Int
+                        )(implicit ctx: VolcanoPlannerContext): Unit = {
+  while (!group.explorationMark.isExplored(round)) {
+    group.explorationMark.markExplored(round)
+    // explore all child groups
+    group.equivalents.foreach { equivalent =>
+      if (!equivalent.explorationMark.isExplored(round)) {
+        equivalent.explorationMark.markExplored(round)
+        equivalent.children.foreach { child =>
+          exploreGroup(child, rules, round)
+          if (equivalent.explorationMark.isExplored(round) && child.explorationMark.isExplored(round)) {
+            equivalent.explorationMark.markExplored(round)
+          } else {
+            equivalent.explorationMark.markUnexplored(round)
+          }
+        }
+      }
+      // fire transformation rules to explore all the possible transformations
+      rules.foreach { rule =>
+        if (!equivalent.appliedTransformations.contains(rule) && rule.`match`(equivalent)) {
+          val transformed = rule.transform(equivalent)
+          if (!group.equivalents.contains(transformed)) {
+            group.equivalents += transformed
+            transformed.explorationMark.markUnexplored(round)
+            group.explorationMark.markUnexplored(round)
+          }
+        }
+      }
+      if (group.explorationMark.isExplored(round) && equivalent.explorationMark.isExplored(round)) {
+        group.explorationMark.markExplored(round)
+      } else {
+        group.explorationMark.markUnexplored(round)
+      }
+    }
+  }
+}
+```
+
+See [VolcanoPlanner.scala](core%2Fsrc%2Fmain%2Fscala%2Fcore%2Fplanner%2Fvolcano%2FVolcanoPlanner.scala) for more details
+
+#### Implement some transformation rules
+
+Now it's time to implement some transformation rules
+
+##### Projection pushdown
+
+Projection pushdown is a simple transformation rule, used to push the projection down to storage layer.
+
+For example, the query
+
+```sql
+SELECT field1, field2
+from tbl
+```
+
+has the plan
+
+```mermaid
+graph LR
+    project[PROJECT field1, field2]
+    scan[SCAN tbl]
+    project --> scan
+```
+
+With this plan, when executing, rows from storage layer (under SCAN) will be fully fetched, and then unnecessary fields
+will be dropped (PROJECT). The unnecessary data is still have to move from SCAN node to PROJECT node, so there are some
+wasted efforts here.
+
+We can make it better by just simply tell the storage layer only fetch the necessary fields. Now the plan will be
+transformed to:
+
+```mermaid
+graph LR
+    project[PROJECT field1, field2]
+    scan["SCAN tbl(field1, field2)"]
+    project --> scan
+```
+
+Let's go into the code:
+
+```scala
+override def `match`(expression: GroupExpression)(implicit ctx: VolcanoPlannerContext): Boolean = {
+  val plan = expression.plan
+  plan match {
+    case Project(_, child) => check(child)
+    case _ => false
+  }
+}
+
+// check if the tree only contains SCAN and JOIN nodes
+private def check(node: LogicalPlan): Boolean = {
+  node match {
+    case Scan(_, _) => true
+    case Join(left, right, _) => check(left) && check(right)
+    case _ => false
+  }
+}
+```
+
+Our projection pushdown rule here, will match the plan when it's the PROJECT node, and all of its descendants are SCAN
+and JOIN node only.
+
+**notes:** Actually the real projection pushdown match is more complex, but for the sake of simplicity, the match rule
+here is just PROJECT node with SCAN and JOIN descendants
+
+And here is the transform code:
+
+```scala
+override def transform(expression: GroupExpression)(implicit ctx: VolcanoPlannerContext): GroupExpression = {
+  val plan = expression.plan.asInstanceOf[Project]
+  val pushDownProjection = mutable.ListBuffer[FieldID]()
+  extractProjections(plan, pushDownProjection)
+  val newPlan = Project(plan.fields, pushDown(pushDownProjection.distinct, plan.child))
+  ctx.memo.getOrCreateGroupExpression(newPlan)
+}
+
+private def extractProjections(node: LogicalPlan, buffer: mutable.ListBuffer[FieldID]): Unit = {
+  node match {
+    case Scan(_, _) => (): Unit
+    case Project(fields, parent) =>
+      buffer ++= fields
+      extractProjections(parent, buffer)
+    case Join(left, right, on) =>
+      buffer ++= on.map(_._1) ++ on.map(_._2)
+      extractProjections(left, buffer)
+      extractProjections(right, buffer)
+  }
+}
+
+private def pushDown(pushDownProjection: Seq[FieldID], node: LogicalPlan): LogicalPlan = {
+  node match {
+    case Scan(table, tableProjection) =>
+      val filteredPushDownProjection = pushDownProjection.filter(_.table == table).map(_.id)
+      val updatedProjection =
+        if (filteredPushDownProjection.contains("*") || filteredPushDownProjection.contains("*.*")) {
+          Seq.empty
+        } else {
+          (tableProjection ++ filteredPushDownProjection).distinct
+        }
+      Scan(table, updatedProjection)
+    case Join(left, right, on) => Join(pushDown(pushDownProjection, left), pushDown(pushDownProjection, right), on)
+    case _ => throw new Exception("should never happen")
+  }
+}
+```
+
+The transform code will first find all projections from the root PROJECT node, and then push them down to all SCAN nodes
+under it.
+
+See [ProjectionPushDown.scala](core%2Fsrc%2Fmain%2Fscala%2Fcore%2Fplanner%2Fvolcano%2Frules%2Ftransform%2FProjectionPushDown.scala)
+for full implementation
+
+After implementing pushdown rule, we can test by visualize it.
+
+For example, the plan
+
+```mermaid
+graph TD
+    subgraph Group#2
+        Expr#2["SCAN tbl2"]
+    end
+    subgraph Group#5
+        Expr#5["JOIN"]
+    end
+    Expr#5 --> Group#1
+    Expr#5 --> Group#4
+    subgraph Group#4
+        Expr#4["JOIN"]
+    end
+    Expr#4 --> Group#2
+    Expr#4 --> Group#3
+    subgraph Group#1
+        Expr#1["SCAN tbl1"]
+    end
+    subgraph Group#3
+        Expr#3["SCAN tbl3"]
+    end
+    subgraph Group#6
+        Expr#6["PROJECT tbl1.id, tbl1.field1, tbl2.id, tbl2.field1, tbl2.field2, tbl3.id, tbl3.field2, tbl3.field2"]
+    end
+    Expr#6 --> Group#5
+```
+
+after applying projection pushdown transformation, will result in a new equivalent plan with the projections are pushed
+down to the SCAN operations (the new plan is the tree with orange border nodes).
+
+```mermaid
+graph TD
+    subgraph Group#8
+        Expr#8["SCAN tbl2 (id, field1, field2)"]
+    end
+    subgraph Group#2
+        Expr#2["SCAN tbl2"]
+    end
+    subgraph Group#11
+        Expr#11["JOIN"]
+    end
+    Expr#11 --> Group#7
+    Expr#11 --> Group#10
+    subgraph Group#5
+        Expr#5["JOIN"]
+    end
+    Expr#5 --> Group#1
+    Expr#5 --> Group#4
+    subgraph Group#4
+        Expr#4["JOIN"]
+    end
+    Expr#4 --> Group#2
+    Expr#4 --> Group#3
+    subgraph Group#7
+        Expr#7["SCAN tbl1 (id, field1)"]
+    end
+    subgraph Group#10
+        Expr#10["JOIN"]
+    end
+    Expr#10 --> Group#8
+    Expr#10 --> Group#9
+    subgraph Group#1
+        Expr#1["SCAN tbl1"]
+    end
+    subgraph Group#9
+        Expr#9["SCAN tbl3 (id, field2)"]
+    end
+    subgraph Group#3
+        Expr#3["SCAN tbl3"]
+    end
+    subgraph Group#6
+        Expr#12["PROJECT tbl1.id, tbl1.field1, tbl2.id, tbl2.field1, tbl2.field2, tbl3.id, tbl3.field2, tbl3.field2"]
+        Expr#6["PROJECT tbl1.id, tbl1.field1, tbl2.id, tbl2.field1, tbl2.field2, tbl3.id, tbl3.field2, tbl3.field2"]
+    end
+    Expr#12 --> Group#11
+    Expr#6 --> Group#5
+    style Expr#12 stroke-width: 4px, stroke: orange
+    style Expr#8 stroke-width: 4px, stroke: orange
+    style Expr#10 stroke-width: 4px, stroke: orange
+    style Expr#9 stroke-width: 4px, stroke: orange
+    style Expr#11 stroke-width: 4px, stroke: orange
+    style Expr#7 stroke-width: 4px, stroke: orange
+    linkStyle 0 stroke-width: 4px, stroke: orange
+    linkStyle 1 stroke-width: 4px, stroke: orange
+    linkStyle 6 stroke-width: 4px, stroke: orange
+    linkStyle 7 stroke-width: 4px, stroke: orange
+    linkStyle 8 stroke-width: 4px, stroke: orange
+```
+
+##### Join reorder
+
+##### Putting all transformations together
 
 ### Optimization phase
 
