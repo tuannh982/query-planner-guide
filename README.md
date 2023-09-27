@@ -2064,18 +2064,18 @@ implementation
 
 ##### JOIN
 
-Writing implementation rule for logical JOIN is way harder than PROJECTION. 
+Writing implementation rule for logical JOIN is way harder than PROJECTION.
 
 One first reason is, a logical JOIN has many
-physical implementation, such as HASH JOIN, MERGE JOIN, BROADCAST JOIN, etc. 
+physical implementation, such as HASH JOIN, MERGE JOIN, BROADCAST JOIN, etc.
 
 The second reason is, estimating cost for
 physical JOIN is also hard, because it depends on lots of factors such as row count, row size, data histogram, indexes,
-data layout, etc. 
+data layout, etc.
 
 So, to keep everything simple in this guide, I will only implement 2 physical JOIN: HASH JOIN and MERGE JOIN. The cost
 estimation functions are fictional (just to show how it works, I'm not trying to correct it). And in the MERGE JOIN, all
-data is assuming to be sorted by join key. 
+data is assuming to be sorted by join key.
 
 Here is the code:
 
@@ -2271,17 +2271,18 @@ val cost = Cost(
 
 See [HashJoinImpl.scala](core%2Fsrc%2Fmain%2Fscala%2Fcore%2Fplanner%2Fvolcano%2Fphysicalplan%2Fbuilder%2FHashJoinImpl.scala)
 and [MergeJoinImpl.scala](core%2Fsrc%2Fmain%2Fscala%2Fcore%2Fplanner%2Fvolcano%2Fphysicalplan%2Fbuilder%2FMergeJoinImpl.scala)
-for full implementation 
+for full implementation
 
 ##### Others
 
 You can see other rules and physical plan builders here:
+
 - [implement](core%2Fsrc%2Fmain%2Fscala%2Fcore%2Fplanner%2Fvolcano%2Frules%2Fimplement)
 - [builder](core%2Fsrc%2Fmain%2Fscala%2Fcore%2Fplanner%2Fvolcano%2Fphysicalplan%2Fbuilder)
 
 #### Putting all pieces together
 
-Now, after done implemented the implementation rules, now we can find our best plan. Let's start over from the user
+Now, after done implementing the implementation rules, now we can find our best plan. Let's start over from the user
 query
 
 ```sql
@@ -2294,8 +2295,8 @@ SELECT tbl1.id,
        tbl3.field2,
        tbl3.field2
 FROM tbl1
-       JOIN tbl2 ON tbl1.id = tbl2.id
-       JOIN tbl3 ON tbl2.id = tbl3.id
+         JOIN tbl2 ON tbl1.id = tbl2.id
+         JOIN tbl3 ON tbl2.id = tbl3.id
 ```
 
 will be converted to the logical plan
@@ -2456,12 +2457,215 @@ Cost: Cost(cpu=40000.00, mem=20000000.00, time=100000.00)
 
 ### Bonus: query execution
 
-#### Another Volcano
+Now we've done building a functional query planner which can optimize the query from user, but our query plan could not
+run by itself. So it's the reason why now we will implement the query processor to test out our query plan.
+
+Basically the query process receive input from the query planner, and execute them
+
+```mermaid
+graph LR
+    plan(("Physical Plan"))
+    storage[("Storage Layer")]
+    processor["Query Processor"]
+    plan -- execute --> processor
+    storage -- fetch --> processor
+```
+
+#### Volcano/Iterator model
+
+Volcano/iterator model is the query processing model that is widely used in many DBMS. It is a pipeline architecture,
+which means that the data is processed in stages, with each stage passing the output of the previous stage to the next
+stage.
+
+Each stage in the pipeline is represented by an operator. Operators are functions that perform a specific operation on
+the data, such as selecting rows, filtering rows, or aggregating rows.
+
+Usually, operator can be formed directly from the query plan. For example, the query
+
+```sql
+SELECT field_1
+FROM tbl
+WHERE field = 1
+```
+
+will have the plan
+
+```mermaid
+graph TD
+    project["PROJECT: field_1"]
+    scan["SCAN: tbl"]
+    filter["FILTER: field = 1"]
+    project --> scan
+    filter --> project
+```
+
+will create a chain of operators like this:
+
+```text
+scan = {
+    next() // fetch next row from table "tbl"
+}
+
+project = {
+    next() = {
+        next_row = scan.next() // fetch next row from scan operator
+        projected = next_row["field_1"]
+        return projected
+    }
+}
+
+filter = {
+    next() = {
+        next_row = {}
+        do {
+            next_row = project.next() // fetch next row from project operator
+        } while (next_row["field"] != 1)
+        return next_row
+    }
+}
+
+results = []
+while (row = filter.next()) {
+    results.append(row)
+}
+```
+
+**notes**: this pseudo code did not handle for end of result stream
 
 #### The operators
 
+The basic interface of an operator is described as following:
+
+```scala
+trait Operator {
+  def next(): Option[Seq[Any]]
+}
+
+```
+
+See [Operator.scala](core%2Fsrc%2Fmain%2Fscala%2Fcore%2Fexecution%2FOperator.scala) for full implementation of all
+operators
+
 #### Testing a simple query
+
+Let's define a query
+
+```sql
+SELECT emp.id,
+       emp.code,
+       dept.dept_name,
+       emp_info.name,
+       emp_info.origin
+FROM emp
+         JOIN dept ON emp.id = dept.emp_id
+         JOIN emp_info ON dept.emp_id = emp_info.id
+```
+
+with some data and stats
+
+```scala
+val table1: Datasource = Datasource(
+  table = "emp",
+  catalog = TableCatalog(
+    Seq(
+      "id" -> classOf[String],
+      "code" -> classOf[String]
+    ),
+    metadata = Map("sorted" -> "true") // assumes rows are already sorted by id
+  ),
+  rows = Seq(
+    Seq("1", "Emp A"),
+    Seq("2", "Emp B"),
+    Seq("3", "Emp C")
+  ),
+  stats = TableStats(
+    estimatedRowCount = 3,
+    avgColumnSize = Map("id" -> 10, "code" -> 32)
+  )
+)
+
+val table2: Datasource = Datasource(
+  table = "dept",
+  catalog = TableCatalog(
+    Seq(
+      "emp_id" -> classOf[String],
+      "dept_name" -> classOf[String]
+    ),
+    metadata = Map("sorted" -> "true") // assumes rows are already sorted by emp_id (this is just a fake trait to demonstrate how trait works)
+  ),
+  rows = Seq(
+    Seq("1", "Dept 1"),
+    Seq("1", "Dept 2"),
+    Seq("2", "Dept 3"),
+    Seq("3", "Dept 3")
+  ),
+  stats = TableStats(
+    estimatedRowCount = 4,
+    avgColumnSize = Map("emp_id" -> 10, "dept_name" -> 255)
+  )
+)
+
+val table3: Datasource = Datasource(
+  table = "emp_info",
+  catalog = TableCatalog(
+    Seq(
+      "id" -> classOf[String],
+      "name" -> classOf[String],
+      "origin" -> classOf[String]
+    ),
+    metadata = Map("sorted" -> "true") // assumes rows are already sorted by id (this is just a fake trait to demonstrate how trait works)
+  ),
+  rows = Seq(
+    Seq("1", "AAAAA", "Country A"),
+    Seq("2", "BBBBB", "Country A"),
+    Seq("3", "CCCCC", "Country B")
+  ),
+  stats = TableStats(
+    estimatedRowCount = 3,
+    avgColumnSize = Map("id" -> 10, "name" -> 255, "origin" -> 255)
+  )
+)
+```
+
+The cost model is optimized for CPU
+
+```scala
+val costModel: CostModel = (currentCost: Cost, newCost: Cost) => {
+  currentCost.estimatedCpuCost > newCost.estimatedCpuCost
+}
+```
+
+Now, executing the query by running this code:
+
+```scala
+val planner = new VolcanoPlanner
+QueryParser.parse(query) match {
+  case Left(err) => throw err
+  case Right(parsed) =>
+    val operator = planner.getPlan(parsed)
+    val result = Utils.execute(operator)
+    // print result
+    println(result._1.mkString(","))
+    result._2.foreach(row => println(row.mkString(",")))
+}
+```
+
+it will print:
+
+```text
+emp.id,emp.code,dept.dept_name,emp_info.name,emp_info.origin
+1,Emp A,Dept 1,AAAAA,Country A
+1,Emp A,Dept 2,AAAAA,Country A
+2,Emp B,Dept 3,BBBBB,Country A
+3,Emp C,Dept 3,CCCCC,Country B
+```
+
+Viola, We've done building a fully functional query planner and query engine :). You can start writing one for your own,
+good luck
+
+See [Demo.scala](demo%2Fsrc%2Fmain%2Fscala%2Fdemo%2FDemo.scala) for full demo code
 
 # Thanks
 
-:beers:
+Thanks for reading this, this guide is quite long, and not fully correct, but I've tried my best to write it as
+understandably as possible :beers:
