@@ -2006,7 +2006,453 @@ Cost: Cost(cpu=40000.00, mem=20000000.00, time=100000.00)
 
 #### Implement the implementation rules
 
+Next, we will implement some implementation rules.
+
+##### PROJECT
+
+The first, easiest one is the implementation rule of logical PROJECT
+
+```scala
+object Project {
+
+  def apply(node: logicalplan.Project)(implicit ctx: VolcanoPlannerContext): Seq[PhysicalPlanBuilder] = {
+    Seq(
+      new ProjectionImpl(node.fields)
+    )
+  }
+}
+
+class ProjectionImpl(projection: Seq[ql.FieldID]) extends PhysicalPlanBuilder {
+
+  override def build(children: Seq[PhysicalPlan]): Option[PhysicalPlan] = {
+    val child = children.head
+    val selfCost = Cost(
+      estimatedCpuCost = 0,
+      estimatedMemoryCost = 0,
+      estimatedTimeCost = 0
+    ) // assuming the cost of projection is 0
+    val cost = Cost(
+      estimatedCpuCost = selfCost.estimatedCpuCost + child.cost().estimatedCpuCost,
+      estimatedMemoryCost = selfCost.estimatedMemoryCost + child.cost().estimatedMemoryCost,
+      estimatedTimeCost = selfCost.estimatedTimeCost + child.cost().estimatedTimeCost
+    )
+    val estimations = Estimations(
+      estimatedLoopIterations = child.estimations().estimatedLoopIterations,
+      estimatedRowSize = child.estimations().estimatedRowSize // just guessing the value
+    )
+    Some(
+      Project(
+        operator = ProjectOperator(projection, child.operator()),
+        child = child,
+        cost = cost,
+        estimations = estimations,
+        traits = child.traits()
+      )
+    )
+  }
+}
+
+```
+
+The implementation rule for logical PROJECT, is returning one physical plan builder `ProjectionImpl`. `ProjectionImpl`
+cost calculation is simple, it just inherits the cost from the child node (because the projection is actually not doing
+any intensive operation). Beside that, it also updates the estimation (in this code, estimation is also inherit from the
+child node)
+
+See [Project.scala](core%2Fsrc%2Fmain%2Fscala%2Fcore%2Fplanner%2Fvolcano%2Frules%2Fimplement%2FProject.scala) for full
+implementation
+
+##### JOIN
+
+Writing implementation rule for logical JOIN is way harder than PROJECTION. 
+
+One first reason is, a logical JOIN has many
+physical implementation, such as HASH JOIN, MERGE JOIN, BROADCAST JOIN, etc. 
+
+The second reason is, estimating cost for
+physical JOIN is also hard, because it depends on lots of factors such as row count, row size, data histogram, indexes,
+data layout, etc. 
+
+So, to keep everything simple in this guide, I will only implement 2 physical JOIN: HASH JOIN and MERGE JOIN. The cost
+estimation functions are fictional (just to show how it works, I'm not trying to correct it). And in the MERGE JOIN, all
+data is assuming to be sorted by join key. 
+
+Here is the code:
+
+```scala
+object Join {
+
+  def apply(node: logicalplan.Join)(implicit ctx: VolcanoPlannerContext): Seq[PhysicalPlanBuilder] = {
+    val leftFields = node.on.map(_._1).map(f => s"${f.table.id}.${f.id}")
+    val rightFields = node.on.map(_._2).map(f => s"${f.table.id}.${f.id}")
+    Seq(
+      new HashJoinImpl(leftFields, rightFields),
+      new MergeJoinImpl(leftFields, rightFields)
+    )
+  }
+}
+
+```
+
+The HASH JOIN:
+
+```scala
+class HashJoinImpl(leftFields: Seq[String], rightFields: Seq[String]) extends PhysicalPlanBuilder {
+
+  private def viewSize(plan: PhysicalPlan): Long = {
+    plan.estimations().estimatedLoopIterations * plan.estimations().estimatedRowSize
+  }
+
+  //noinspection ZeroIndexToHead,DuplicatedCode
+  override def build(children: Seq[PhysicalPlan]): Option[PhysicalPlan] = {
+    // reorder the child nodes, the left child is the child with smaller view size (smaller than the right child if we're store all of them in memory)
+    val (leftChild, rightChild) = if (viewSize(children(0)) < viewSize(children(1))) {
+      (children(0), children(1))
+    } else {
+      (children(1), children(0))
+    }
+    val estimatedLoopIterations = Math.max(
+      leftChild.estimations().estimatedLoopIterations,
+      rightChild.estimations().estimatedLoopIterations
+    ) // just guessing the value
+    val estimatedOutRowSize = leftChild.estimations().estimatedRowSize + rightChild.estimations().estimatedRowSize
+    val selfCost = Cost(
+      estimatedCpuCost = leftChild.estimations().estimatedLoopIterations, // cost to hash all record from the smaller view
+      estimatedMemoryCost = viewSize(leftChild), // hash the smaller view, we need to hold the hash table in memory
+      estimatedTimeCost = rightChild.estimations().estimatedLoopIterations
+    )
+    val childCosts = Cost(
+      estimatedCpuCost = leftChild.cost().estimatedCpuCost + rightChild.cost().estimatedCpuCost,
+      estimatedMemoryCost = leftChild.cost().estimatedMemoryCost + rightChild.cost().estimatedMemoryCost,
+      estimatedTimeCost = 0
+    )
+    val estimations = Estimations(
+      estimatedLoopIterations = estimatedLoopIterations,
+      estimatedRowSize = estimatedOutRowSize
+    )
+    val cost = Cost(
+      estimatedCpuCost = selfCost.estimatedCpuCost + childCosts.estimatedCpuCost,
+      estimatedMemoryCost = selfCost.estimatedMemoryCost + childCosts.estimatedMemoryCost,
+      estimatedTimeCost = selfCost.estimatedTimeCost + childCosts.estimatedTimeCost
+    )
+    Some(
+      Join(
+        operator = HashJoinOperator(
+          leftChild.operator(),
+          rightChild.operator(),
+          leftFields,
+          rightFields
+        ),
+        leftChild = leftChild,
+        rightChild = rightChild,
+        cost = cost,
+        estimations = estimations,
+        traits = Set.empty // don't inherit trait from children since we're hash join
+      )
+    )
+  }
+}
+
+```
+
+We can see that the cost function of HASH JOIN is composed of its children costs and estimations
+
+```scala
+val selfCost = Cost(
+  estimatedCpuCost = leftChild.estimations().estimatedLoopIterations, // cost to hash all record from the smaller view
+  estimatedMemoryCost = viewSize(leftChild), // hash the smaller view, we need to hold the hash table in memory
+  estimatedTimeCost = rightChild.estimations().estimatedLoopIterations
+)
+
+val childCosts = Cost(
+  estimatedCpuCost = leftChild.cost().estimatedCpuCost + rightChild.cost().estimatedCpuCost,
+  estimatedMemoryCost = leftChild.cost().estimatedMemoryCost + rightChild.cost().estimatedMemoryCost,
+  estimatedTimeCost = 0
+)
+
+val estimations = Estimations(
+  estimatedLoopIterations = estimatedLoopIterations,
+  estimatedRowSize = estimatedOutRowSize
+)
+
+val cost = Cost(
+  estimatedCpuCost = selfCost.estimatedCpuCost + childCosts.estimatedCpuCost,
+  estimatedMemoryCost = selfCost.estimatedMemoryCost + childCosts.estimatedMemoryCost,
+  estimatedTimeCost = selfCost.estimatedTimeCost + childCosts.estimatedTimeCost
+)
+```
+
+Next, the MERGE JOIN:
+
+```scala
+class MergeJoinImpl(leftFields: Seq[String], rightFields: Seq[String]) extends PhysicalPlanBuilder {
+
+  //noinspection ZeroIndexToHead,DuplicatedCode
+  override def build(children: Seq[PhysicalPlan]): Option[PhysicalPlan] = {
+    val (leftChild, rightChild) = (children(0), children(1))
+    if (leftChild.traits().contains("SORTED") && rightChild.traits().contains("SORTED")) {
+      val estimatedTotalRowCount =
+        leftChild.estimations().estimatedLoopIterations +
+          rightChild.estimations().estimatedLoopIterations
+      val estimatedLoopIterations = Math.max(
+        leftChild.estimations().estimatedLoopIterations,
+        rightChild.estimations().estimatedLoopIterations
+      ) // just guessing the value
+      val estimatedOutRowSize = leftChild.estimations().estimatedRowSize + rightChild.estimations().estimatedRowSize
+      val selfCost = Cost(
+        estimatedCpuCost = 0, // no additional cpu cost, just scan from child iterator
+        estimatedMemoryCost = 0, // no additional memory cost
+        estimatedTimeCost = estimatedTotalRowCount
+      )
+      val childCosts = Cost(
+        estimatedCpuCost = leftChild.cost().estimatedCpuCost + rightChild.cost().estimatedCpuCost,
+        estimatedMemoryCost = leftChild.cost().estimatedMemoryCost + rightChild.cost().estimatedMemoryCost,
+        estimatedTimeCost = 0
+      )
+      val estimations = Estimations(
+        estimatedLoopIterations = estimatedLoopIterations,
+        estimatedRowSize = estimatedOutRowSize
+      )
+      val cost = Cost(
+        estimatedCpuCost = selfCost.estimatedCpuCost + childCosts.estimatedCpuCost,
+        estimatedMemoryCost = selfCost.estimatedMemoryCost + childCosts.estimatedMemoryCost,
+        estimatedTimeCost = selfCost.estimatedTimeCost + childCosts.estimatedTimeCost
+      )
+      Some(
+        Join(
+          operator = MergeJoinOperator(
+            leftChild.operator(),
+            rightChild.operator(),
+            leftFields,
+            rightFields
+          ),
+          leftChild = leftChild,
+          rightChild = rightChild,
+          cost = cost,
+          estimations = estimations,
+          traits = leftChild.traits() ++ rightChild.traits()
+        )
+      )
+    } else {
+      None
+    }
+  }
+}
+
+```
+
+Same with HASH JOIN, MERGE JOIN also uses its children costs and estimations to calculate its cost, but with different
+formulla:
+
+```scala
+val selfCost = Cost(
+  estimatedCpuCost = 0, // no additional cpu cost, just scan from child iterator
+  estimatedMemoryCost = 0, // no additional memory cost
+  estimatedTimeCost = estimatedTotalRowCount
+)
+
+val childCosts = Cost(
+  estimatedCpuCost = leftChild.cost().estimatedCpuCost + rightChild.cost().estimatedCpuCost,
+  estimatedMemoryCost = leftChild.cost().estimatedMemoryCost + rightChild.cost().estimatedMemoryCost,
+  estimatedTimeCost = 0
+)
+
+val estimations = Estimations(
+  estimatedLoopIterations = estimatedLoopIterations,
+  estimatedRowSize = estimatedOutRowSize
+)
+
+val cost = Cost(
+  estimatedCpuCost = selfCost.estimatedCpuCost + childCosts.estimatedCpuCost,
+  estimatedMemoryCost = selfCost.estimatedMemoryCost + childCosts.estimatedMemoryCost,
+  estimatedTimeCost = selfCost.estimatedTimeCost + childCosts.estimatedTimeCost
+)
+```
+
+See [HashJoinImpl.scala](core%2Fsrc%2Fmain%2Fscala%2Fcore%2Fplanner%2Fvolcano%2Fphysicalplan%2Fbuilder%2FHashJoinImpl.scala)
+and [MergeJoinImpl.scala](core%2Fsrc%2Fmain%2Fscala%2Fcore%2Fplanner%2Fvolcano%2Fphysicalplan%2Fbuilder%2FMergeJoinImpl.scala)
+for full implementation 
+
+##### Others
+
+You can see other rules and physical plan builders here:
+- [implement](core%2Fsrc%2Fmain%2Fscala%2Fcore%2Fplanner%2Fvolcano%2Frules%2Fimplement)
+- [builder](core%2Fsrc%2Fmain%2Fscala%2Fcore%2Fplanner%2Fvolcano%2Fphysicalplan%2Fbuilder)
+
 #### Putting all pieces together
+
+Now, after done implemented the implementation rules, now we can find our best plan. Let's start over from the user
+query
+
+```sql
+SELECT tbl1.id,
+       tbl1.field1,
+       tbl2.id,
+       tbl2.field1,
+       tbl2.field2,
+       tbl3.id,
+       tbl3.field2,
+       tbl3.field2
+FROM tbl1
+       JOIN tbl2 ON tbl1.id = tbl2.id
+       JOIN tbl3 ON tbl2.id = tbl3.id
+```
+
+will be converted to the logical plan
+
+```mermaid
+graph TD
+    1326583549["PROJECT tbl1.id, tbl1.field1, tbl2.id, tbl2.field1, tbl2.field2, tbl3.id, tbl3.field2, tbl3.field2"];
+    -425111028["JOIN"];
+    -349388609["SCAN tbl1"];
+    1343755644["JOIN"];
+    -1043437086["SCAN tbl2"];
+    -1402686787["SCAN tbl3"];
+    1326583549 --> -425111028;
+    -425111028 --> -349388609;
+    -425111028 --> 1343755644;
+    1343755644 --> -1043437086;
+    1343755644 --> -1402686787;
+```
+
+After exploration phase, it will generate lots of equivalent plans
+
+```mermaid
+graph TD
+    subgraph Group#8
+        Expr#8["SCAN tbl2 (id, field1, field2)"]
+    end
+    subgraph Group#11
+        Expr#11["JOIN"]
+        Expr#14["JOIN"]
+    end
+    Expr#11 --> Group#7
+    Expr#11 --> Group#10
+    Expr#14 --> Group#8
+    Expr#14 --> Group#12
+    subgraph Group#2
+        Expr#2["SCAN tbl2"]
+    end
+    subgraph Group#5
+        Expr#5["JOIN"]
+        Expr#16["JOIN"]
+    end
+    Expr#5 --> Group#1
+    Expr#5 --> Group#4
+    Expr#16 --> Group#2
+    Expr#16 --> Group#13
+    subgraph Group#4
+        Expr#4["JOIN"]
+    end
+    Expr#4 --> Group#2
+    Expr#4 --> Group#3
+    subgraph Group#13
+        Expr#15["JOIN"]
+    end
+    Expr#15 --> Group#1
+    Expr#15 --> Group#3
+    subgraph Group#7
+        Expr#7["SCAN tbl1 (id, field1)"]
+    end
+    subgraph Group#1
+        Expr#1["SCAN tbl1"]
+    end
+    subgraph Group#10
+        Expr#10["JOIN"]
+    end
+    Expr#10 --> Group#8
+    Expr#10 --> Group#9
+    subgraph Group#9
+        Expr#9["SCAN tbl3 (id, field2)"]
+    end
+    subgraph Group#3
+        Expr#3["SCAN tbl3"]
+    end
+    subgraph Group#12
+        Expr#13["JOIN"]
+    end
+    Expr#13 --> Group#7
+    Expr#13 --> Group#9
+    subgraph Group#6
+        Expr#12["PROJECT tbl1.id, tbl1.field1, tbl2.id, tbl2.field1, tbl2.field2, tbl3.id, tbl3.field2, tbl3.field2"]
+        Expr#6["PROJECT tbl1.id, tbl1.field1, tbl2.id, tbl2.field1, tbl2.field2, tbl3.id, tbl3.field2, tbl3.field2"]
+    end
+    Expr#12 --> Group#11
+    Expr#6 --> Group#5
+    style Expr#12 stroke-width: 4px, stroke: orange
+    style Expr#8 stroke-width: 4px, stroke: orange
+    style Expr#10 stroke-width: 4px, stroke: orange
+    style Expr#13 stroke-width: 4px, stroke: orange
+    style Expr#14 stroke-width: 4px, stroke: orange
+    style Expr#11 stroke-width: 4px, stroke: orange
+    style Expr#9 stroke-width: 4px, stroke: orange
+    style Expr#15 stroke-width: 4px, stroke: orange
+    style Expr#7 stroke-width: 4px, stroke: orange
+    style Expr#16 stroke-width: 4px, stroke: orange
+    linkStyle 0 stroke-width: 4px, stroke: orange
+    linkStyle 15 stroke-width: 4px, stroke: orange
+    linkStyle 12 stroke-width: 4px, stroke: orange
+    linkStyle 1 stroke-width: 4px, stroke: orange
+    linkStyle 16 stroke-width: 4px, stroke: orange
+    linkStyle 13 stroke-width: 4px, stroke: orange
+    linkStyle 2 stroke-width: 4px, stroke: orange
+    linkStyle 6 stroke-width: 4px, stroke: orange
+    linkStyle 3 stroke-width: 4px, stroke: orange
+    linkStyle 10 stroke-width: 4px, stroke: orange
+    linkStyle 7 stroke-width: 4px, stroke: orange
+    linkStyle 14 stroke-width: 4px, stroke: orange
+    linkStyle 11 stroke-width: 4px, stroke: orange
+```
+
+And the at optimization phase, a final best plan is chose
+
+```mermaid
+graph TD
+    Group#6["
+    Group #6
+Selected: PROJECT tbl1.id, tbl1.field1, tbl2.id, tbl2.field1, tbl2.field2, tbl3.id, tbl3.field2, tbl3.field2
+Operator: ProjectOperator
+Cost: Cost(cpu=641400.00, mem=1020400012.00, time=1000000.00)
+"]
+Group#6 --> Group#11
+Group#11["
+Group #11
+Selected: JOIN
+Operator: HashJoinOperator
+Cost: Cost(cpu=641400.00, mem=1020400012.00, time=1000000.00)
+"]
+Group#11 --> Group#7
+Group#11 --> Group#10
+Group#7["
+Group #7
+Selected: SCAN tbl1 (id, field1)
+Operator: NormalScanOperator
+Cost: Cost(cpu=400.00, mem=400000.00, time=1000.00)
+"]
+Group#10["
+Group #10
+Selected: JOIN
+Operator: MergeJoinOperator
+Traits: SORTED
+Cost: Cost(cpu=640000.00, mem=20000012.00, time=1100000.00)
+"]
+Group#10 --> Group#8
+Group#10 --> Group#9
+Group#8["
+Group #8
+Selected: SCAN tbl2 (id, field1, field2)
+Operator: NormalScanOperator
+Traits: SORTED
+Cost: Cost(cpu=600000.00, mem=12.00, time=1000000.00)
+"]
+Group#9["
+Group #9
+Selected: SCAN tbl3 (id, field2)
+Operator: NormalScanOperator
+Traits: SORTED
+Cost: Cost(cpu=40000.00, mem=20000000.00, time=100000.00)
+"]
+```
 
 ### Bonus: query execution
 
