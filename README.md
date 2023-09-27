@@ -1760,15 +1760,253 @@ for example, the `Expr#4` cost is calculated by its child group costs (`Group#2`
 Another example, is the `Group#4`, its cost is calculated by calculating the min value between the costs of its
 equivalent expressions.
 
+#### Physical plan
+
+Since the goal of optimization phase is to produce the best physical plan given the explored group expressions. We can
+define the physical plan as following:
+
+```scala
+sealed trait PhysicalPlan {
+  def operator(): Operator
+
+  def children(): Seq[PhysicalPlan]
+
+  def cost(): Cost
+
+  def estimations(): Estimations
+
+  def traits(): Set[String]
+}
+
+```
+
+The `operator` is the physical operator, which used to execute the plan, we will cover it in later section.
+Then `children` is the list of child plan nodes, they're used to participating in the process of cost calculation. The
+third attribute is `cost`, `cost` is an object holding cost information (such as CPU cost, Memory cost, IO cost,
+etc.). `estimations` is the property holding estimated statistics about the plan (such as row count, row size, etc.),
+it's also participating in cost calculation. Finally, `traits` is a set of physical traits, which affect the
+implementation rule to affect the physical plan generation process.
+
+Next, we can implement the physical node classes:
+
+```scala
+case class Scan(
+                 operator: Operator,
+                 cost: Cost,
+                 estimations: Estimations,
+                 traits: Set[String] = Set.empty
+               ) extends PhysicalPlan {
+  override def children(): Seq[PhysicalPlan] = Seq.empty // scan do not receive any child
+}
+
+case class Project(
+                    operator: Operator,
+                    child: PhysicalPlan,
+                    cost: Cost,
+                    estimations: Estimations,
+                    traits: Set[String] = Set.empty
+                  ) extends PhysicalPlan {
+  override def children(): Seq[PhysicalPlan] = Seq(child)
+}
+
+case class Join(
+                 operator: Operator,
+                 leftChild: PhysicalPlan,
+                 rightChild: PhysicalPlan,
+                 cost: Cost,
+                 estimations: Estimations,
+                 traits: Set[String] = Set.empty
+               ) extends PhysicalPlan {
+  override def children(): Seq[PhysicalPlan] = Seq(leftChild, rightChild)
+}
+
+```
+
+See [PhysicalPlan.scala](core%2Fsrc%2Fmain%2Fscala%2Fcore%2Fplanner%2Fvolcano%2Fphysicalplan%2FPhysicalPlan.scala) for
+full implementation
+
 #### Implementation rule
 
-#### Plan enumerations
+The first thing in optimization phase, that is, we have to implement the implementation rules. Implementation rule is
+the rule to convert from logical plan to physical plans without executing them.
 
-#### Estimating the cost
+Since we're not directly executing the physical plan in the planner, so we will return the physical plan builder
+instead, also it's easier to customize the cost function for each node.
+
+Here is the interface of implementation rule:
+
+```scala
+trait PhysicalPlanBuilder {
+  def build(children: Seq[PhysicalPlan]): Option[PhysicalPlan]
+}
+
+trait ImplementationRule {
+  def physicalPlanBuilders(expression: GroupExpression)(implicit ctx: VolcanoPlannerContext): Seq[PhysicalPlanBuilder]
+}
+
+```
+
+Here the `PhysicalPlanBuilder` is the interface used to build the physical plan, given the child physical plans.
+
+For example, the logical JOIN has 2 physical implementations are HASH JOIN and MERGE JOIN
+
+```mermaid
+graph TD
+    child#1["child#1"]
+    child#2["child#2"]
+    child#3["child#3"]
+    child#4["child#4"]
+    hash_join["`HASH JOIN 
+    cost=f(cost(child#1),cost(child#2))
+    `"]
+    merge_join["`MERGE JOIN
+    cost=g(cost(child#3),cost(child#4))
+    `"]
+    hash_join --> child#1
+    hash_join --> child#2
+    merge_join --> child#3
+    merge_join --> child#4
+```
+
+the HASH JOIN cost is using function `f()` to calculate cost, and MERGE JOIN is using function `g()` to calculate cost,
+both are using its children as function parameters. So it's easier to code if we're returning just the phyiscal plan
+builder from the implementation rule instead of the physical plan.
 
 #### Finding the best plan
 
-#### Visualize our best plan
+As we've said before, the optimization process is described as following:
+
+- For each group, we will find the best implementation by choosing the group expressing with the lowest cost
+- For each group expression, first we will enumerate the physical implementations from the logical plan. Then for each
+  physical implementation, we will calculate its cost using its child group costs.
+
+And here is the code:
+
+```scala
+private def implementGroup(group: Group, combinedRule: ImplementationRule)(
+  implicit ctx: VolcanoPlannerContext
+): GroupImplementation = {
+  group.implementation match {
+    case Some(implementation) => implementation
+    case None =>
+      var bestImplementation = Option.empty[GroupImplementation]
+      group.equivalents.foreach { equivalent =>
+        val physicalPlanBuilders = combinedRule.physicalPlanBuilders(equivalent)
+        val childPhysicalPlans = equivalent.children.map { child =>
+          val childImplementation = implementGroup(child, combinedRule)
+          child.implementation = Option(childImplementation)
+          childImplementation.physicalPlan
+        }
+        // calculate the implementation, and update the best cost for group
+        physicalPlanBuilders.flatMap(_.build(childPhysicalPlans)).foreach { physicalPlan =>
+          val cost = physicalPlan.cost()
+          bestImplementation match {
+            case Some(currentBest) =>
+              if (ctx.costModel.isBetter(currentBest.cost, cost)) {
+                bestImplementation = Option(
+                  GroupImplementation(
+                    physicalPlan = physicalPlan,
+                    cost = cost,
+                    selectedEquivalentExpression = equivalent
+                  )
+                )
+              }
+            case None =>
+              bestImplementation = Option(
+                GroupImplementation(
+                  physicalPlan = physicalPlan,
+                  cost = cost,
+                  selectedEquivalentExpression = equivalent
+                )
+              )
+          }
+        }
+      }
+      bestImplementation.get
+  }
+}
+```
+
+This code is an exhaustive search code, which is using recursive function to traverse all nodes. At each node (group),
+the function is called once to get its best plan while also calculate the optimal cost of that group.
+
+Finally, the best plan for our query is the best plan of the root group
+
+```scala
+val implementationRules = new ImplementationRule {
+
+  override def physicalPlanBuilders(
+                                     expression: GroupExpression
+                                   )(implicit ctx: VolcanoPlannerContext): Seq[PhysicalPlanBuilder] = {
+    expression.plan match {
+      case node@Scan(_, _) => implement.Scan(node)
+      case node@Project(_, _) => implement.Project(node)
+      case node@Join(_, _, _) => implement.Join(node)
+    }
+  }
+}
+
+ctx.rootGroup.implementation = Option(implementGroup(ctx.rootGroup, implementationRules))
+```
+
+See [VolcanoPlanner.scala](core%2Fsrc%2Fmain%2Fscala%2Fcore%2Fplanner%2Fvolcano%2FVolcanoPlanner.scala) for full
+implementation
+
+Here is an example of the plan after optimization, it's shown the selected logical node, the selected physical operator,
+and the estimated cost
+
+```mermaid
+
+graph TD
+    Group#6["
+    Group #6
+Selected: PROJECT tbl1.id, tbl1.field1, tbl2.id, tbl2.field1, tbl2.field2, tbl3.id, tbl3.field2, tbl3.field2
+Operator: ProjectOperator
+Cost: Cost(cpu=641400.00, mem=1020400012.00, time=1000000.00)
+"]
+Group#6 --> Group#11
+Group#11["
+Group #11
+Selected: JOIN
+Operator: HashJoinOperator
+Cost: Cost(cpu=641400.00, mem=1020400012.00, time=1000000.00)
+"]
+Group#11 --> Group#7
+Group#11 --> Group#10
+Group#7["
+Group #7
+Selected: SCAN tbl1 (id, field1)
+Operator: NormalScanOperator
+Cost: Cost(cpu=400.00, mem=400000.00, time=1000.00)
+"]
+Group#10["
+Group #10
+Selected: JOIN
+Operator: MergeJoinOperator
+Traits: SORTED
+Cost: Cost(cpu=640000.00, mem=20000012.00, time=1100000.00)
+"]
+Group#10 --> Group#8
+Group#10 --> Group#9
+Group#8["
+Group #8
+Selected: SCAN tbl2 (id, field1, field2)
+Operator: NormalScanOperator
+Traits: SORTED
+Cost: Cost(cpu=600000.00, mem=12.00, time=1000000.00)
+"]
+Group#9["
+Group #9
+Selected: SCAN tbl3 (id, field2)
+Operator: NormalScanOperator
+Traits: SORTED
+Cost: Cost(cpu=40000.00, mem=20000000.00, time=100000.00)
+"]
+```
+
+#### Implement the implementation rules
+
+#### Putting all pieces together
 
 ### Bonus: query execution
 
