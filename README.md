@@ -30,13 +30,13 @@ Goals:
 
 ```mermaid
 graph TD
-  user((user))
-  parser[Query Parser]
-  planner[Query Planner]
-  executor[Query Processor]
-  user -- text query --> parser
-  parser -- AST --> planner
-  planner -- physical plan --> executor
+    user((user))
+    parser[Query Parser]
+    planner[Query Planner]
+    executor[Query Processor]
+    user -- text query --> parser
+    parser -- AST --> planner
+    planner -- physical plan --> executor
 ```
 
 Basic architecture of a query engine is consisted of those components:
@@ -112,18 +112,18 @@ Our planner will be consisted of 2 main phases:
 
 ```mermaid
 graph LR
-  ast((AST))
-  logical_plan[Plan]
-  explored_plans["`
+    ast((AST))
+    logical_plan[Plan]
+    explored_plans["`
         Plan #1
         ...
         Plan #N
     `"]
-  implementation_plan["Plan #X (best plan)"]
-  ast -- convert to logical plan --> logical_plan
-  logical_plan -- exploration phase --> explored_plans
-  explored_plans -- optimization phase --> implementation_plan
-  linkStyle 1,2 color: orange, stroke: orange, stroke-width: 5px
+    implementation_plan["Plan #X (best plan)"]
+    ast -- convert to logical plan --> logical_plan
+    logical_plan -- exploration phase --> explored_plans
+    explored_plans -- optimization phase --> implementation_plan
+    linkStyle 1,2 color: orange, stroke: orange, stroke-width: 5px
 ```
 
 #### Glossary
@@ -136,17 +136,17 @@ Here is an example of a logical plan:
 
 ```mermaid
 graph TD
-  1["PROJECT tbl1.id, tbl1.field1, tbl2.field1, tbl2.field2, tbl3.id, tbl3.field2, tbl3.field2"];
-  2["JOIN"];
-  3["SCAN tbl1"];
-  4["JOIN"];
-  5["SCAN tbl2"];
-  6["SCAN tbl3"];
-  1 --> 2;
-  2 --> 3;
-  2 --> 4;
-  4 --> 5;
-  4 --> 6;
+    1["PROJECT tbl1.id, tbl1.field1, tbl2.field1, tbl2.field2, tbl3.id, tbl3.field2, tbl3.field2"];
+    2["JOIN"];
+    3["SCAN tbl1"];
+    4["JOIN"];
+    5["SCAN tbl2"];
+    6["SCAN tbl3"];
+    1 --> 2;
+    2 --> 3;
+    2 --> 4;
+    4 --> 5;
+    4 --> 6;
 ```
 
 ##### Physical plan
@@ -164,50 +164,50 @@ e.g.
 
 ```mermaid
 graph TD
-  subgraph Group#8
-    Expr#8["SCAN tbl2 (field1, field2, id)"]
-  end
-  subgraph Group#2
-    Expr#2["SCAN tbl2"]
-  end
-  subgraph Group#11
-    Expr#11["JOIN"]
-  end
-  Expr#11 --> Group#7
-  Expr#11 --> Group#10
-  subgraph Group#5
-    Expr#5["JOIN"]
-  end
-  Expr#5 --> Group#1
-  Expr#5 --> Group#4
-  subgraph Group#4
-    Expr#4["JOIN"]
-  end
-  Expr#4 --> Group#2
-  Expr#4 --> Group#3
-  subgraph Group#7
-    Expr#7["SCAN tbl1 (id, field1)"]
-  end
-  subgraph Group#1
-    Expr#1["SCAN tbl1"]
-  end
-  subgraph Group#10
-    Expr#10["JOIN"]
-  end
-  Expr#10 --> Group#8
-  Expr#10 --> Group#9
-  subgraph Group#9
-    Expr#9["SCAN tbl3 (id, field2)"]
-  end
-  subgraph Group#3
-    Expr#3["SCAN tbl3"]
-  end
-  subgraph Group#6
-    Expr#12["PROJECT tbl1.id, tbl1.field1, tbl2.field1, tbl2.field2, tbl3.id, tbl3.field2, tbl3.field2"]
-    Expr#6["PROJECT tbl1.id, tbl1.field1, tbl2.field1, tbl2.field2, tbl3.id, tbl3.field2, tbl3.field2"]
-  end
-  Expr#12 --> Group#11
-  Expr#6 --> Group#5
+    subgraph Group#8
+        Expr#8["SCAN tbl2 (field1, field2, id)"]
+    end
+    subgraph Group#2
+        Expr#2["SCAN tbl2"]
+    end
+    subgraph Group#11
+        Expr#11["JOIN"]
+    end
+    Expr#11 --> Group#7
+    Expr#11 --> Group#10
+    subgraph Group#5
+        Expr#5["JOIN"]
+    end
+    Expr#5 --> Group#1
+    Expr#5 --> Group#4
+    subgraph Group#4
+        Expr#4["JOIN"]
+    end
+    Expr#4 --> Group#2
+    Expr#4 --> Group#3
+    subgraph Group#7
+        Expr#7["SCAN tbl1 (id, field1)"]
+    end
+    subgraph Group#1
+        Expr#1["SCAN tbl1"]
+    end
+    subgraph Group#10
+        Expr#10["JOIN"]
+    end
+    Expr#10 --> Group#8
+    Expr#10 --> Group#9
+    subgraph Group#9
+        Expr#9["SCAN tbl3 (id, field2)"]
+    end
+    subgraph Group#3
+        Expr#3["SCAN tbl3"]
+    end
+    subgraph Group#6
+        Expr#12["PROJECT tbl1.id, tbl1.field1, tbl2.field1, tbl2.field2, tbl3.id, tbl3.field2, tbl3.field2"]
+        Expr#6["PROJECT tbl1.id, tbl1.field1, tbl2.field1, tbl2.field2, tbl3.id, tbl3.field2, tbl3.field2"]
+    end
+    Expr#12 --> Group#11
+    Expr#6 --> Group#5
 ```
 
 Here we can see `Group#6` is having 2 equivalent expressions, which are both representing the same query (one is doing
@@ -221,34 +221,34 @@ For example, the plan:
 
 ```mermaid
 graph TD
-  1["PROJECT tbl1.id, tbl1.field1, tbl2.field1, tbl2.field2, tbl3.id, tbl3.field2, tbl3.field2"];
-  2["JOIN"];
-  3["SCAN tbl1"];
-  4["JOIN"];
-  5["SCAN tbl2"];
-  6["SCAN tbl3"];
-  1 --> 2;
-  2 --> 3;
-  2 --> 4;
-  4 --> 5;
-  4 --> 6;
+    1["PROJECT tbl1.id, tbl1.field1, tbl2.field1, tbl2.field2, tbl3.id, tbl3.field2, tbl3.field2"];
+    2["JOIN"];
+    3["SCAN tbl1"];
+    4["JOIN"];
+    5["SCAN tbl2"];
+    6["SCAN tbl3"];
+    1 --> 2;
+    2 --> 3;
+    2 --> 4;
+    4 --> 5;
+    4 --> 6;
 ```
 
 when apply the projection pushdown transformation, is transformed to:
 
 ```mermaid
 graph TD
-  1["PROJECT *.*"];
-  2["JOIN"];
-  3["SCAN tbl1 (id, field1)"];
-  4["JOIN"];
-  5["SCAN tbl2 (field1, field2)"];
-  6["SCAN tbl3 (id, field2, field2)"];
-  1 --> 2;
-  2 --> 3;
-  2 --> 4;
-  4 --> 5;
-  4 --> 6;
+    1["PROJECT *.*"];
+    2["JOIN"];
+    3["SCAN tbl1 (id, field1)"];
+    4["JOIN"];
+    5["SCAN tbl2 (field1, field2)"];
+    6["SCAN tbl3 (id, field2, field2)"];
+    1 --> 2;
+    2 --> 3;
+    2 --> 4;
+    4 --> 5;
+    4 --> 6;
 ```
 
 The transformation rule can be affect by logical traits/properties such as table schema, data statistics, etc.
@@ -267,83 +267,83 @@ For example, the plan:
 
 ```mermaid
 graph TD
-  1326583549["PROJECT tbl1.id, tbl1.field1, tbl2.id, tbl2.field1, tbl2.field2, tbl3.id, tbl3.field2, tbl3.field2"];
-  -425111028["JOIN"];
-  -349388609["SCAN tbl1"];
-  1343755644["JOIN"];
-  -1043437086["SCAN tbl2"];
-  -1402686787["SCAN tbl3"];
-  1326583549 --> -425111028;
-  -425111028 --> -349388609;
-  -425111028 --> 1343755644;
-  1343755644 --> -1043437086;
-  1343755644 --> -1402686787;
+    1326583549["PROJECT tbl1.id, tbl1.field1, tbl2.id, tbl2.field1, tbl2.field2, tbl3.id, tbl3.field2, tbl3.field2"];
+    -425111028["JOIN"];
+    -349388609["SCAN tbl1"];
+    1343755644["JOIN"];
+    -1043437086["SCAN tbl2"];
+    -1402686787["SCAN tbl3"];
+    1326583549 --> -425111028;
+    -425111028 --> -349388609;
+    -425111028 --> 1343755644;
+    1343755644 --> -1043437086;
+    1343755644 --> -1402686787;
 ```
 
 After applying transformation rules, resulting in the following graph:
 
 ```mermaid
 graph TD
-  subgraph Group#8
-    Expr#8["SCAN tbl2 (id, field1, field2)"]
-  end
-  subgraph Group#11
-    Expr#11["JOIN"]
-    Expr#14["JOIN"]
-  end
-  Expr#11 --> Group#7
-  Expr#11 --> Group#10
-  Expr#14 --> Group#8
-  Expr#14 --> Group#12
-  subgraph Group#2
-    Expr#2["SCAN tbl2"]
-  end
-  subgraph Group#5
-    Expr#5["JOIN"]
-    Expr#16["JOIN"]
-  end
-  Expr#5 --> Group#1
-  Expr#5 --> Group#4
-  Expr#16 --> Group#2
-  Expr#16 --> Group#13
-  subgraph Group#4
-    Expr#4["JOIN"]
-  end
-  Expr#4 --> Group#2
-  Expr#4 --> Group#3
-  subgraph Group#13
-    Expr#15["JOIN"]
-  end
-  Expr#15 --> Group#1
-  Expr#15 --> Group#3
-  subgraph Group#7
-    Expr#7["SCAN tbl1 (id, field1)"]
-  end
-  subgraph Group#1
-    Expr#1["SCAN tbl1"]
-  end
-  subgraph Group#10
-    Expr#10["JOIN"]
-  end
-  Expr#10 --> Group#8
-  Expr#10 --> Group#9
-  subgraph Group#9
-    Expr#9["SCAN tbl3 (id, field2)"]
-  end
-  subgraph Group#3
-    Expr#3["SCAN tbl3"]
-  end
-  subgraph Group#12
-    Expr#13["JOIN"]
-  end
-  Expr#13 --> Group#7
-  Expr#13 --> Group#9
-  subgraph Group#6
-    Expr#12["PROJECT tbl1.id, tbl1.field1, tbl2.id, tbl2.field1, tbl2.field2, tbl3.id, tbl3.field2, tbl3.field2"]
-    Expr#6["PROJECT tbl1.id, tbl1.field1, tbl2.id, tbl2.field1, tbl2.field2, tbl3.id, tbl3.field2, tbl3.field2"]
-  end
-  Expr#12 --> Group#11
-  Expr#6 --> Group#5
+    subgraph Group#8
+        Expr#8["SCAN tbl2 (id, field1, field2)"]
+    end
+    subgraph Group#11
+        Expr#11["JOIN"]
+        Expr#14["JOIN"]
+    end
+    Expr#11 --> Group#7
+    Expr#11 --> Group#10
+    Expr#14 --> Group#8
+    Expr#14 --> Group#12
+    subgraph Group#2
+        Expr#2["SCAN tbl2"]
+    end
+    subgraph Group#5
+        Expr#5["JOIN"]
+        Expr#16["JOIN"]
+    end
+    Expr#5 --> Group#1
+    Expr#5 --> Group#4
+    Expr#16 --> Group#2
+    Expr#16 --> Group#13
+    subgraph Group#4
+        Expr#4["JOIN"]
+    end
+    Expr#4 --> Group#2
+    Expr#4 --> Group#3
+    subgraph Group#13
+        Expr#15["JOIN"]
+    end
+    Expr#15 --> Group#1
+    Expr#15 --> Group#3
+    subgraph Group#7
+        Expr#7["SCAN tbl1 (id, field1)"]
+    end
+    subgraph Group#1
+        Expr#1["SCAN tbl1"]
+    end
+    subgraph Group#10
+        Expr#10["JOIN"]
+    end
+    Expr#10 --> Group#8
+    Expr#10 --> Group#9
+    subgraph Group#9
+        Expr#9["SCAN tbl3 (id, field2)"]
+    end
+    subgraph Group#3
+        Expr#3["SCAN tbl3"]
+    end
+    subgraph Group#12
+        Expr#13["JOIN"]
+    end
+    Expr#13 --> Group#7
+    Expr#13 --> Group#9
+    subgraph Group#6
+        Expr#12["PROJECT tbl1.id, tbl1.field1, tbl2.id, tbl2.field1, tbl2.field2, tbl3.id, tbl3.field2, tbl3.field2"]
+        Expr#6["PROJECT tbl1.id, tbl1.field1, tbl2.id, tbl2.field1, tbl2.field2, tbl3.id, tbl3.field2, tbl3.field2"]
+    end
+    Expr#12 --> Group#11
+    Expr#6 --> Group#5
 ```
 
 Here we can see that projection pushdown rule and join reorder rule are applied.
@@ -361,7 +361,7 @@ Here is the example of generated physical plan after optimization phase:
 ```mermaid
 
 graph TD
-  Group#6["
+    Group#6["
     Group #6
 Selected: PROJECT tbl1.id, tbl1.field1, tbl2.id, tbl2.field1, tbl2.field2, tbl3.id, tbl3.field2, tbl3.field2
 Operator: ProjectOperator
@@ -429,8 +429,8 @@ SELECT emp.id,
        emp_info.name,
        emp_info.origin
 FROM emp
-       JOIN dept ON emp.id = dept.emp_id
-       JOIN emp_info ON dept.emp_id = emp_info.id
+         JOIN dept ON emp.id = dept.emp_id
+         JOIN emp_info ON dept.emp_id = emp_info.id
 ```
 
 The query language we will implement is a SQL-like language.
@@ -483,8 +483,8 @@ SELECT tbl1.id,
        tbl3.field2,
        tbl3.field2
 FROM tbl1
-       JOIN tbl2 ON tbl1.id = tbl2.id
-       JOIN tbl3 ON tbl2.id = tbl3.id
+         JOIN tbl2 ON tbl1.id = tbl2.id
+         JOIN tbl3 ON tbl2.id = tbl3.id
 ```
 
 can be represented as
@@ -644,8 +644,8 @@ In SQL, we can use a sub-query as a JOIN source. For example:
 ```sql
 SELECT *.*
 FROM tbl1
-  JOIN (SELECT *.* FROM tbl2)
-  JOIN tbl3
+    JOIN (SELECT *.* FROM tbl2)
+    JOIN tbl3
 ```
 
 So our parser will also implement rules to parse the sub-query in the JOIN part of the statement, that's why we have the
@@ -678,17 +678,17 @@ sealed trait LogicalPlan {
 
 ```mermaid
 graph TD
-  1326583549["PROJECT tbl1.id, tbl1.field1, tbl2.id, tbl2.field1, tbl2.field2, tbl3.id, tbl3.field2, tbl3.field2"];
-  -425111028["JOIN"];
-  -349388609["SCAN tbl1"];
-  1343755644["JOIN"];
-  -1043437086["SCAN tbl2"];
-  -1402686787["SCAN tbl3"];
-  1326583549 --> -425111028;
-  -425111028 --> -349388609;
-  -425111028 --> 1343755644;
-  1343755644 --> -1043437086;
-  1343755644 --> -1402686787;
+    1326583549["PROJECT tbl1.id, tbl1.field1, tbl2.id, tbl2.field1, tbl2.field2, tbl3.id, tbl3.field2, tbl3.field2"];
+    -425111028["JOIN"];
+    -349388609["SCAN tbl1"];
+    1343755644["JOIN"];
+    -1043437086["SCAN tbl2"];
+    -1402686787["SCAN tbl3"];
+    1326583549 --> -425111028;
+    -425111028 --> -349388609;
+    -425111028 --> 1343755644;
+    1343755644 --> -1043437086;
+    1343755644 --> -1402686787;
 ```
 
 The child nodes of the `PROJECT` node is the first `JOIN` node. The first `JOIN` node has 2 children, which are the
@@ -738,17 +738,17 @@ We can define classes for Group as following:
 
 ```scala
 case class Group(
-                        id: Long,
-                        equivalents: mutable.HashSet[GroupExpression]
+                  id: Long,
+                  equivalents: mutable.HashSet[GroupExpression]
                 ) {
   val explorationMark: ExplorationMark = new ExplorationMark
   var implementation: Option[GroupImplementation] = None
 }
 
 case class GroupExpression(
-                                  id: Long,
-                                  plan: LogicalPlan,
-                                  children: mutable.MutableList[Group]
+                            id: Long,
+                            plan: LogicalPlan,
+                            children: mutable.MutableList[Group]
                           ) {
   val explorationMark: ExplorationMark = new ExplorationMark
   val appliedTransformations: mutable.HashSet[TransformationRule] = mutable.HashSet()
@@ -766,50 +766,50 @@ e.g.
 
 ```mermaid
 graph TD
-  subgraph Group#8
-    Expr#8
-  end
-  subgraph Group#2
-    Expr#2
-  end
-  subgraph Group#11
-    Expr#11
-  end
-  Expr#11 --> Group#7
-  Expr#11 --> Group#10
-  subgraph Group#5
-    Expr#5
-  end
-  Expr#5 --> Group#1
-  Expr#5 --> Group#4
-  subgraph Group#4
-    Expr#4
-  end
-  Expr#4 --> Group#2
-  Expr#4 --> Group#3
-  subgraph Group#7
-    Expr#7
-  end
-  subgraph Group#1
-    Expr#1
-  end
-  subgraph Group#10
-    Expr#10
-  end
-  Expr#10 --> Group#8
-  Expr#10 --> Group#9
-  subgraph Group#9
-    Expr#9
-  end
-  subgraph Group#3
-    Expr#3
-  end
-  subgraph Group#6
-    Expr#12
-    Expr#6
-  end
-  Expr#12 --> Group#11
-  Expr#6 --> Group#5
+    subgraph Group#8
+        Expr#8
+    end
+    subgraph Group#2
+        Expr#2
+    end
+    subgraph Group#11
+        Expr#11
+    end
+    Expr#11 --> Group#7
+    Expr#11 --> Group#10
+    subgraph Group#5
+        Expr#5
+    end
+    Expr#5 --> Group#1
+    Expr#5 --> Group#4
+    subgraph Group#4
+        Expr#4
+    end
+    Expr#4 --> Group#2
+    Expr#4 --> Group#3
+    subgraph Group#7
+        Expr#7
+    end
+    subgraph Group#1
+        Expr#1
+    end
+    subgraph Group#10
+        Expr#10
+    end
+    Expr#10 --> Group#8
+    Expr#10 --> Group#9
+    subgraph Group#9
+        Expr#9
+    end
+    subgraph Group#3
+        Expr#3
+    end
+    subgraph Group#6
+        Expr#12
+        Expr#6
+    end
+    Expr#12 --> Group#11
+    Expr#6 --> Group#5
 ```
 
 As we can see here, the `Group#6` has 2 equivalent expressions: `Expr#12` and `Expr#6`, and the children of `Expr#12`
@@ -847,8 +847,8 @@ group and group expression, also provide methods to register new group or group 
 
 ```scala
 class Memo(
-                  groupIdGenerator: Generator[Long] = new LongGenerator,
-                  groupExpressionIdGenerator: Generator[Long] = new LongGenerator
+            groupIdGenerator: Generator[Long] = new LongGenerator,
+            groupExpressionIdGenerator: Generator[Long] = new LongGenerator
           ) {
   val groups: mutable.HashMap[Long, Group] = mutable.HashMap[Long, Group]()
   val parents: mutable.HashMap[Long, Group] = mutable.HashMap[Long, Group]() // lookup group from group expression ID
@@ -903,13 +903,13 @@ The first step inside the planner, is initialization
 
 ```mermaid
 graph LR
-  query((query))
-  ast((ast))
-  root_plan((rootPlan))
-  root_group((rootGroup))
-  query -- " QueryParser.parse(query) " --> ast
-  ast -- " LogicalPlan.toPlan(ast) " --> root_plan
-  root_plan -- " memo.getOrCreateGroup(rootPlan) " --> root_group
+    query((query))
+    ast((ast))
+    root_plan((rootPlan))
+    root_group((rootGroup))
+    query -- " QueryParser.parse(query) " --> ast
+    ast -- " LogicalPlan.toPlan(ast) " --> root_plan
+    root_plan -- " memo.getOrCreateGroup(rootPlan) " --> root_group
 ```
 
 First, query will be parsed into AST. Then converted to logical plan, called `root plan`, then initialize the group
@@ -942,37 +942,37 @@ SELECT tbl1.id,
        tbl3.field2,
        tbl3.field2
 FROM tbl1
-       JOIN tbl2 ON tbl1.id = tbl2.id
-       JOIN tbl3 ON tbl2.id = tbl3.id
+         JOIN tbl2 ON tbl1.id = tbl2.id
+         JOIN tbl3 ON tbl2.id = tbl3.id
 ```
 
 after initialization, the groups will be looked like this:
 
 ```mermaid
 graph TD
-  subgraph Group#2
-    Expr#2["SCAN tbl2"]
-  end
-  subgraph Group#5
-    Expr#5["JOIN"]
-  end
-  Expr#5 --> Group#1
-  Expr#5 --> Group#4
-  subgraph Group#4
-    Expr#4["JOIN"]
-  end
-  Expr#4 --> Group#2
-  Expr#4 --> Group#3
-  subgraph Group#1
-    Expr#1["SCAN tbl1"]
-  end
-  subgraph Group#3
-    Expr#3["SCAN tbl3"]
-  end
-  subgraph Group#6
-    Expr#6["PROJECT tbl1.id, tbl1.field1, tbl2.id, tbl2.field1, tbl2.field2, tbl3.id, tbl3.field2, tbl3.field2"]
-  end
-  Expr#6 --> Group#5
+    subgraph Group#2
+        Expr#2["SCAN tbl2"]
+    end
+    subgraph Group#5
+        Expr#5["JOIN"]
+    end
+    Expr#5 --> Group#1
+    Expr#5 --> Group#4
+    subgraph Group#4
+        Expr#4["JOIN"]
+    end
+    Expr#4 --> Group#2
+    Expr#4 --> Group#3
+    subgraph Group#1
+        Expr#1["SCAN tbl1"]
+    end
+    subgraph Group#3
+        Expr#3["SCAN tbl3"]
+    end
+    subgraph Group#6
+        Expr#6["PROJECT tbl1.id, tbl1.field1, tbl2.id, tbl2.field1, tbl2.field2, tbl3.id, tbl3.field2, tbl3.field2"]
+    end
+    Expr#6 --> Group#5
 ```
 
 Here you can see that, every group has exactly one equivalent expression
@@ -1034,62 +1034,62 @@ This plan is "matched":
 
 ```mermaid
 graph TD
-  subgraph Group#2
-    Expr#2["SCAN"]
-  end
-  subgraph Group#5
-    Expr#5["JOIN"]
-  end
-  Expr#5 --> Group#1
-  Expr#5 --> Group#4
-  subgraph Group#4
-    Expr#4["JOIN"]
-  end
-  Expr#4 --> Group#2
-  Expr#4 --> Group#3
-  subgraph Group#1
-    Expr#1["SCAN"]
-  end
-  subgraph Group#3
-    Expr#3["SCAN"]
-  end
-  subgraph Group#6
-    Expr#6["PROJECT"]
-  end
-  Expr#6 --> Group#5
+    subgraph Group#2
+        Expr#2["SCAN"]
+    end
+    subgraph Group#5
+        Expr#5["JOIN"]
+    end
+    Expr#5 --> Group#1
+    Expr#5 --> Group#4
+    subgraph Group#4
+        Expr#4["JOIN"]
+    end
+    Expr#4 --> Group#2
+    Expr#4 --> Group#3
+    subgraph Group#1
+        Expr#1["SCAN"]
+    end
+    subgraph Group#3
+        Expr#3["SCAN"]
+    end
+    subgraph Group#6
+        Expr#6["PROJECT"]
+    end
+    Expr#6 --> Group#5
 ```
 
 While this plan is not:
 
 ```mermaid
 graph TD
-  subgraph Group#2
-    Expr#2["SCAN"]
-  end
-  subgraph Group#5
-    Expr#5["JOIN"]
-  end
-  Expr#5 --> Group#3
-  Expr#5 --> Group#4
-  subgraph Group#4
-    Expr#4["SCAN"]
-  end
-  subgraph Group#7
-    Expr#7["PROJECT"]
-  end
-  Expr#7 --> Group#6
-  subgraph Group#1
-    Expr#1["SCAN"]
-  end
-  subgraph Group#3
-    Expr#3["PROJECT"]
-  end
-  Expr#3 --> Group#2
-  subgraph Group#6
-    Expr#6["JOIN"]
-  end
-  Expr#6 --> Group#1
-  Expr#6 --> Group#5
+    subgraph Group#2
+        Expr#2["SCAN"]
+    end
+    subgraph Group#5
+        Expr#5["JOIN"]
+    end
+    Expr#5 --> Group#3
+    Expr#5 --> Group#4
+    subgraph Group#4
+        Expr#4["SCAN"]
+    end
+    subgraph Group#7
+        Expr#7["PROJECT"]
+    end
+    Expr#7 --> Group#6
+    subgraph Group#1
+        Expr#1["SCAN"]
+    end
+    subgraph Group#3
+        Expr#3["PROJECT"]
+    end
+    Expr#3 --> Group#2
+    subgraph Group#6
+        Expr#6["JOIN"]
+    end
+    Expr#6 --> Group#1
+    Expr#6 --> Group#5
 ```
 
 #### Plan enumerations
@@ -1104,9 +1104,9 @@ And here is exploration code (quite simple, huh):
 
 ```scala
 private def exploreGroup(
-                                group: Group,
-                                rules: Seq[TransformationRule],
-                                round: Int
+                          group: Group,
+                          rules: Seq[TransformationRule],
+                          round: Int
                         )(implicit ctx: VolcanoPlannerContext): Unit = {
   while (!group.explorationMark.isExplored(round)) {
     group.explorationMark.markExplored(round)
@@ -1165,9 +1165,9 @@ has the plan
 
 ```mermaid
 graph LR
-  project[PROJECT field1, field2]
-  scan[SCAN tbl]
-  project --> scan
+    project[PROJECT field1, field2]
+    scan[SCAN tbl]
+    project --> scan
 ```
 
 With this plan, when executing, rows from storage layer (under SCAN) will be fully fetched, and then unnecessary fields
@@ -1179,9 +1179,9 @@ transformed to:
 
 ```mermaid
 graph LR
-  project[PROJECT field1, field2]
-  scan["SCAN tbl(field1, field2)"]
-  project --> scan
+    project[PROJECT field1, field2]
+    scan["SCAN tbl(field1, field2)"]
+    project --> scan
 ```
 
 Let's go into the code:
@@ -1259,29 +1259,29 @@ Visualizing our rule, for example, the plan
 
 ```mermaid
 graph TD
-  subgraph Group#2
-    Expr#2["SCAN tbl2"]
-  end
-  subgraph Group#5
-    Expr#5["JOIN"]
-  end
-  Expr#5 --> Group#1
-  Expr#5 --> Group#4
-  subgraph Group#4
-    Expr#4["JOIN"]
-  end
-  Expr#4 --> Group#2
-  Expr#4 --> Group#3
-  subgraph Group#1
-    Expr#1["SCAN tbl1"]
-  end
-  subgraph Group#3
-    Expr#3["SCAN tbl3"]
-  end
-  subgraph Group#6
-    Expr#6["PROJECT tbl1.id, tbl1.field1, tbl2.id, tbl2.field1, tbl2.field2, tbl3.id, tbl3.field2, tbl3.field2"]
-  end
-  Expr#6 --> Group#5
+    subgraph Group#2
+        Expr#2["SCAN tbl2"]
+    end
+    subgraph Group#5
+        Expr#5["JOIN"]
+    end
+    Expr#5 --> Group#1
+    Expr#5 --> Group#4
+    subgraph Group#4
+        Expr#4["JOIN"]
+    end
+    Expr#4 --> Group#2
+    Expr#4 --> Group#3
+    subgraph Group#1
+        Expr#1["SCAN tbl1"]
+    end
+    subgraph Group#3
+        Expr#3["SCAN tbl3"]
+    end
+    subgraph Group#6
+        Expr#6["PROJECT tbl1.id, tbl1.field1, tbl2.id, tbl2.field1, tbl2.field2, tbl3.id, tbl3.field2, tbl3.field2"]
+    end
+    Expr#6 --> Group#5
 ```
 
 after applying projection pushdown transformation, will result in a new equivalent plan with the projections are pushed
@@ -1289,61 +1289,61 @@ down to the SCAN operations (the new plan is the tree with orange border nodes).
 
 ```mermaid
 graph TD
-  subgraph Group#8
-    Expr#8["SCAN tbl2 (id, field1, field2)"]
-  end
-  subgraph Group#2
-    Expr#2["SCAN tbl2"]
-  end
-  subgraph Group#11
-    Expr#11["JOIN"]
-  end
-  Expr#11 --> Group#7
-  Expr#11 --> Group#10
-  subgraph Group#5
-    Expr#5["JOIN"]
-  end
-  Expr#5 --> Group#1
-  Expr#5 --> Group#4
-  subgraph Group#4
-    Expr#4["JOIN"]
-  end
-  Expr#4 --> Group#2
-  Expr#4 --> Group#3
-  subgraph Group#7
-    Expr#7["SCAN tbl1 (id, field1)"]
-  end
-  subgraph Group#10
-    Expr#10["JOIN"]
-  end
-  Expr#10 --> Group#8
-  Expr#10 --> Group#9
-  subgraph Group#1
-    Expr#1["SCAN tbl1"]
-  end
-  subgraph Group#9
-    Expr#9["SCAN tbl3 (id, field2)"]
-  end
-  subgraph Group#3
-    Expr#3["SCAN tbl3"]
-  end
-  subgraph Group#6
-    Expr#12["PROJECT tbl1.id, tbl1.field1, tbl2.id, tbl2.field1, tbl2.field2, tbl3.id, tbl3.field2, tbl3.field2"]
-    Expr#6["PROJECT tbl1.id, tbl1.field1, tbl2.id, tbl2.field1, tbl2.field2, tbl3.id, tbl3.field2, tbl3.field2"]
-  end
-  Expr#12 --> Group#11
-  Expr#6 --> Group#5
-  style Expr#12 stroke-width: 4px, stroke: orange
-  style Expr#8 stroke-width: 4px, stroke: orange
-  style Expr#10 stroke-width: 4px, stroke: orange
-  style Expr#9 stroke-width: 4px, stroke: orange
-  style Expr#11 stroke-width: 4px, stroke: orange
-  style Expr#7 stroke-width: 4px, stroke: orange
-  linkStyle 0 stroke-width: 4px, stroke: orange
-  linkStyle 1 stroke-width: 4px, stroke: orange
-  linkStyle 6 stroke-width: 4px, stroke: orange
-  linkStyle 7 stroke-width: 4px, stroke: orange
-  linkStyle 8 stroke-width: 4px, stroke: orange
+    subgraph Group#8
+        Expr#8["SCAN tbl2 (id, field1, field2)"]
+    end
+    subgraph Group#2
+        Expr#2["SCAN tbl2"]
+    end
+    subgraph Group#11
+        Expr#11["JOIN"]
+    end
+    Expr#11 --> Group#7
+    Expr#11 --> Group#10
+    subgraph Group#5
+        Expr#5["JOIN"]
+    end
+    Expr#5 --> Group#1
+    Expr#5 --> Group#4
+    subgraph Group#4
+        Expr#4["JOIN"]
+    end
+    Expr#4 --> Group#2
+    Expr#4 --> Group#3
+    subgraph Group#7
+        Expr#7["SCAN tbl1 (id, field1)"]
+    end
+    subgraph Group#10
+        Expr#10["JOIN"]
+    end
+    Expr#10 --> Group#8
+    Expr#10 --> Group#9
+    subgraph Group#1
+        Expr#1["SCAN tbl1"]
+    end
+    subgraph Group#9
+        Expr#9["SCAN tbl3 (id, field2)"]
+    end
+    subgraph Group#3
+        Expr#3["SCAN tbl3"]
+    end
+    subgraph Group#6
+        Expr#12["PROJECT tbl1.id, tbl1.field1, tbl2.id, tbl2.field1, tbl2.field2, tbl3.id, tbl3.field2, tbl3.field2"]
+        Expr#6["PROJECT tbl1.id, tbl1.field1, tbl2.id, tbl2.field1, tbl2.field2, tbl3.id, tbl3.field2, tbl3.field2"]
+    end
+    Expr#12 --> Group#11
+    Expr#6 --> Group#5
+    style Expr#12 stroke-width: 4px, stroke: orange
+    style Expr#8 stroke-width: 4px, stroke: orange
+    style Expr#10 stroke-width: 4px, stroke: orange
+    style Expr#9 stroke-width: 4px, stroke: orange
+    style Expr#11 stroke-width: 4px, stroke: orange
+    style Expr#7 stroke-width: 4px, stroke: orange
+    linkStyle 0 stroke-width: 4px, stroke: orange
+    linkStyle 1 stroke-width: 4px, stroke: orange
+    linkStyle 6 stroke-width: 4px, stroke: orange
+    linkStyle 7 stroke-width: 4px, stroke: orange
+    linkStyle 8 stroke-width: 4px, stroke: orange
 ```
 
 See [ProjectionPushDown.scala](core%2Fsrc%2Fmain%2Fscala%2Fcore%2Fplanner%2Fvolcano%2Frules%2Ftransform%2FProjectionPushDown.scala)
@@ -1362,9 +1362,9 @@ First, the rule `match`:
 ```scala
 // check if the tree only contains SCAN and JOIN nodes, and also extract all SCAN nodes and JOIN conditions
 private def checkAndExtract(
-                                   node: LogicalPlan,
-                                   buffer: mutable.ListBuffer[Scan],
-                                   joinCondBuffer: mutable.ListBuffer[(ql.FieldID, ql.FieldID)]
+                             node: LogicalPlan,
+                             buffer: mutable.ListBuffer[Scan],
+                             joinCondBuffer: mutable.ListBuffer[(ql.FieldID, ql.FieldID)]
                            ): Boolean = {
   node match {
     case node@Scan(_, _) =>
@@ -1428,8 +1428,8 @@ For example,
 
 ```sql
 tbl1
-  JOIN tbl2 ON tbl1.field1 = tbl2.field2
-  JOIN tbl3 ON tbl1.field1 = tbl3.field3
+    JOIN tbl2 ON tbl1.field1 = tbl2.field2
+    JOIN tbl3 ON tbl1.field1 = tbl3.field3
 ```
 
 The join statement here will be "matched" since it's 3-way JOIN (it's the join between `tbl1`, `tbl2`, `tbl3`, and the
@@ -1495,72 +1495,72 @@ Visualizing our rule, for example, the plan
 
 ```mermaid
 graph TD
-  subgraph Group#2
-    Expr#2["SCAN tbl2"]
-  end
-  subgraph Group#5
-    Expr#5["JOIN"]
-  end
-  Expr#5 --> Group#1
-  Expr#5 --> Group#4
-  subgraph Group#4
-    Expr#4["JOIN"]
-  end
-  Expr#4 --> Group#2
-  Expr#4 --> Group#3
-  subgraph Group#1
-    Expr#1["SCAN tbl1"]
-  end
-  subgraph Group#3
-    Expr#3["SCAN tbl3"]
-  end
-  subgraph Group#6
-    Expr#6["PROJECT tbl1.id, tbl1.field1, tbl2.id, tbl2.field1, tbl2.field2, tbl3.id, tbl3.field2, tbl3.field2"]
-  end
-  Expr#6 --> Group#5
+    subgraph Group#2
+        Expr#2["SCAN tbl2"]
+    end
+    subgraph Group#5
+        Expr#5["JOIN"]
+    end
+    Expr#5 --> Group#1
+    Expr#5 --> Group#4
+    subgraph Group#4
+        Expr#4["JOIN"]
+    end
+    Expr#4 --> Group#2
+    Expr#4 --> Group#3
+    subgraph Group#1
+        Expr#1["SCAN tbl1"]
+    end
+    subgraph Group#3
+        Expr#3["SCAN tbl3"]
+    end
+    subgraph Group#6
+        Expr#6["PROJECT tbl1.id, tbl1.field1, tbl2.id, tbl2.field1, tbl2.field2, tbl3.id, tbl3.field2, tbl3.field2"]
+    end
+    Expr#6 --> Group#5
 ```
 
 after join reorder transformation, resulting in
 
 ```mermaid
 graph TD
-  subgraph Group#2
-    Expr#2["SCAN tbl2"]
-  end
-  subgraph Group#5
-    Expr#5["JOIN"]
-    Expr#8["JOIN"]
-  end
-  Expr#5 --> Group#1
-  Expr#5 --> Group#4
-  Expr#8 --> Group#2
-  Expr#8 --> Group#7
-  subgraph Group#4
-    Expr#4["JOIN"]
-  end
-  Expr#4 --> Group#2
-  Expr#4 --> Group#3
-  subgraph Group#7
-    Expr#7["JOIN"]
-  end
-  Expr#7 --> Group#1
-  Expr#7 --> Group#3
-  subgraph Group#1
-    Expr#1["SCAN tbl1"]
-  end
-  subgraph Group#3
-    Expr#3["SCAN tbl3"]
-  end
-  subgraph Group#6
-    Expr#6["PROJECT tbl1.id, tbl1.field1, tbl2.id, tbl2.field1, tbl2.field2, tbl3.id, tbl3.field2, tbl3.field2"]
-  end
-  Expr#6 --> Group#5
-  style Expr#8 stroke-width: 4px, stroke: orange
-  style Expr#7 stroke-width: 4px, stroke: orange
-  linkStyle 2 stroke-width: 4px, stroke: orange
-  linkStyle 6 stroke-width: 4px, stroke: orange
-  linkStyle 3 stroke-width: 4px, stroke: orange
-  linkStyle 7 stroke-width: 4px, stroke: orange
+    subgraph Group#2
+        Expr#2["SCAN tbl2"]
+    end
+    subgraph Group#5
+        Expr#5["JOIN"]
+        Expr#8["JOIN"]
+    end
+    Expr#5 --> Group#1
+    Expr#5 --> Group#4
+    Expr#8 --> Group#2
+    Expr#8 --> Group#7
+    subgraph Group#4
+        Expr#4["JOIN"]
+    end
+    Expr#4 --> Group#2
+    Expr#4 --> Group#3
+    subgraph Group#7
+        Expr#7["JOIN"]
+    end
+    Expr#7 --> Group#1
+    Expr#7 --> Group#3
+    subgraph Group#1
+        Expr#1["SCAN tbl1"]
+    end
+    subgraph Group#3
+        Expr#3["SCAN tbl3"]
+    end
+    subgraph Group#6
+        Expr#6["PROJECT tbl1.id, tbl1.field1, tbl2.id, tbl2.field1, tbl2.field2, tbl3.id, tbl3.field2, tbl3.field2"]
+    end
+    Expr#6 --> Group#5
+    style Expr#8 stroke-width: 4px, stroke: orange
+    style Expr#7 stroke-width: 4px, stroke: orange
+    linkStyle 2 stroke-width: 4px, stroke: orange
+    linkStyle 6 stroke-width: 4px, stroke: orange
+    linkStyle 3 stroke-width: 4px, stroke: orange
+    linkStyle 7 stroke-width: 4px, stroke: orange
 ```
 
 we can see that `tbl2 JOIN tbl1 JOIN tbl3` is created from `tbl1 JOIN tbl2 JOIN tbl3` is generated by the
@@ -1570,6 +1570,143 @@ See [X3TableJoinReorderBySize.scala](core%2Fsrc%2Fmain%2Fscala%2Fcore%2Fplanner%
 for full implementation
 
 ##### Putting all transformations together
+
+Now we can put our transformation rules in one place
+
+```scala
+private val transformationRules: Seq[Seq[TransformationRule]] = Seq(
+  Seq(new ProjectionPushDown),
+  Seq(new X3TableJoinReorderBySize)
+)
+```
+
+And run them to explore the equivalent groups
+
+```scala
+for (r <- transformationRules.indices) {
+  exploreGroup(ctx.rootGroup, transformationRules(r), r + 1)
+}
+```
+
+For example, the plan
+
+```mermaid
+graph TD
+    subgraph Group#2
+        Expr#2["SCAN tbl2"]
+    end
+    subgraph Group#5
+        Expr#5["JOIN"]
+    end
+    Expr#5 --> Group#1
+    Expr#5 --> Group#4
+    subgraph Group#4
+        Expr#4["JOIN"]
+    end
+    Expr#4 --> Group#2
+    Expr#4 --> Group#3
+    subgraph Group#1
+        Expr#1["SCAN tbl1"]
+    end
+    subgraph Group#3
+        Expr#3["SCAN tbl3"]
+    end
+    subgraph Group#6
+        Expr#6["PROJECT tbl1.id, tbl1.field1, tbl2.id, tbl2.field1, tbl2.field2, tbl3.id, tbl3.field2, tbl3.field2"]
+    end
+    Expr#6 --> Group#5
+```
+
+after being explored, will result in this graph
+
+```mermaid
+graph TD
+    subgraph Group#8
+        Expr#8["SCAN tbl2 (id, field1, field2)"]
+    end
+    subgraph Group#11
+        Expr#11["JOIN"]
+        Expr#14["JOIN"]
+    end
+    Expr#11 --> Group#7
+    Expr#11 --> Group#10
+    Expr#14 --> Group#8
+    Expr#14 --> Group#12
+    subgraph Group#2
+        Expr#2["SCAN tbl2"]
+    end
+    subgraph Group#5
+        Expr#5["JOIN"]
+        Expr#16["JOIN"]
+    end
+    Expr#5 --> Group#1
+    Expr#5 --> Group#4
+    Expr#16 --> Group#2
+    Expr#16 --> Group#13
+    subgraph Group#4
+        Expr#4["JOIN"]
+    end
+    Expr#4 --> Group#2
+    Expr#4 --> Group#3
+    subgraph Group#13
+        Expr#15["JOIN"]
+    end
+    Expr#15 --> Group#1
+    Expr#15 --> Group#3
+    subgraph Group#7
+        Expr#7["SCAN tbl1 (id, field1)"]
+    end
+    subgraph Group#1
+        Expr#1["SCAN tbl1"]
+    end
+    subgraph Group#10
+        Expr#10["JOIN"]
+    end
+    Expr#10 --> Group#8
+    Expr#10 --> Group#9
+    subgraph Group#9
+        Expr#9["SCAN tbl3 (id, field2)"]
+    end
+    subgraph Group#3
+        Expr#3["SCAN tbl3"]
+    end
+    subgraph Group#12
+        Expr#13["JOIN"]
+    end
+    Expr#13 --> Group#7
+    Expr#13 --> Group#9
+    subgraph Group#6
+        Expr#12["PROJECT tbl1.id, tbl1.field1, tbl2.id, tbl2.field1, tbl2.field2, tbl3.id, tbl3.field2, tbl3.field2"]
+        Expr#6["PROJECT tbl1.id, tbl1.field1, tbl2.id, tbl2.field1, tbl2.field2, tbl3.id, tbl3.field2, tbl3.field2"]
+    end
+    Expr#12 --> Group#11
+    Expr#6 --> Group#5
+    style Expr#12 stroke-width: 4px, stroke: orange
+    style Expr#8 stroke-width: 4px, stroke: orange
+    style Expr#10 stroke-width: 4px, stroke: orange
+    style Expr#13 stroke-width: 4px, stroke: orange
+    style Expr#14 stroke-width: 4px, stroke: orange
+    style Expr#11 stroke-width: 4px, stroke: orange
+    style Expr#9 stroke-width: 4px, stroke: orange
+    style Expr#15 stroke-width: 4px, stroke: orange
+    style Expr#7 stroke-width: 4px, stroke: orange
+    style Expr#16 stroke-width: 4px, stroke: orange
+    linkStyle 0 stroke-width: 4px, stroke: orange
+    linkStyle 15 stroke-width: 4px, stroke: orange
+    linkStyle 12 stroke-width: 4px, stroke: orange
+    linkStyle 1 stroke-width: 4px, stroke: orange
+    linkStyle 16 stroke-width: 4px, stroke: orange
+    linkStyle 13 stroke-width: 4px, stroke: orange
+    linkStyle 2 stroke-width: 4px, stroke: orange
+    linkStyle 6 stroke-width: 4px, stroke: orange
+    linkStyle 3 stroke-width: 4px, stroke: orange
+    linkStyle 10 stroke-width: 4px, stroke: orange
+    linkStyle 7 stroke-width: 4px, stroke: orange
+    linkStyle 14 stroke-width: 4px, stroke: orange
+    linkStyle 11 stroke-width: 4px, stroke: orange
+```
+
+See [VolcanoPlanner.scala](core%2Fsrc%2Fmain%2Fscala%2Fcore%2Fplanner%2Fvolcano%2FVolcanoPlanner.scala) for more details
 
 ### Optimization phase
 
