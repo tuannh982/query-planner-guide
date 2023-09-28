@@ -2492,11 +2492,11 @@ will have the plan
 
 ```mermaid
 graph TD
-    project["PROJECT: field_1"]
-    scan["SCAN: tbl"]
-    filter["FILTER: field = 1"]
-    project --> scan
-    filter --> project
+  project["PROJECT: field_1"]
+  scan["SCAN: tbl"]
+  filter["FILTER: field = 1"]
+  project --> scan
+  filter --> project
 ```
 
 will create a chain of operators like this:
