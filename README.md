@@ -2660,7 +2660,7 @@ emp.id,emp.code,dept.dept_name,emp_info.name,emp_info.origin
 3,Emp C,Dept 3,CCCCC,Country B
 ```
 
-Viola, We've done building a fully functional query planner and query engine :). You can start writing one for your own,
+Voila, We've done building a fully functional query planner and query engine :). You can start writing one for your own,
 good luck
 
 See [Demo.scala](demo%2Fsrc%2Fmain%2Fscala%2Fdemo%2FDemo.scala) for full demo code
