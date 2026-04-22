@@ -1,15 +1,15 @@
-[placeholder]
+# A Practical Guide to Building a Cost-Based Query Planner
 
 ## Introduction
 
-A query planner is a component of a database management system (DBMS) that is responsible for generating a plan for
-executing a database query. The query plan specifies the steps that the DBMS will take to retrieve the data requested by
-the query. The goal of the query planner is to generate a plan that is as efficient as possible, meaning that it will
-return the data to the user as quickly as possible.
+A query planner sits at the heart of every database management system. Given a query written by the user, its job is to
+decide *how* that query should be answered — which tables to read, in what order to join them, and which physical
+algorithms to use. A good plan returns results quickly; a bad plan can turn a one-second query into a one-hour one.
 
-Query planners are complex pieces of software, and they can be difficult to understand. This guide to implementing a
-cost-based query planner will provide you with a step-by-step overview of the process, how to implement your own
-cost-based query planner, while still cover the basic concepts of query planner.
+Query planners have a reputation for being one of the most intricate parts of a DBMS, and for good reason: they blend
+relational algebra, search algorithms, cost modeling, and a pile of heuristics. This guide cuts through that complexity
+by walking you through the construction of a working cost-based query planner from scratch, introducing just enough
+theory to make the code make sense.
 
 > Written by AI, edited by human
 
@@ -39,52 +39,54 @@ graph TD
     planner -- physical plan --> executor
 ```
 
-Basic architecture of a query engine is consisted of those components:
+At a high level, a query engine is built from three cooperating components:
 
-- **Query parser:** used to parse user query input, usually in human-readable text format (such as SQL)
-- **Query planner:** used to generate the plan/strategy to execute the query. Normally the query planner will choose the
-  best plan among several plans generated from a single query
-- **Query processor:** used to execute the query plan, which is output by the query planner
+- **Query parser:** turns the raw text the user wrote (typically SQL) into a structured representation — an Abstract
+  Syntax Tree (AST) — that the rest of the engine can reason about.
+- **Query planner:** takes the AST and produces an execution strategy. When several strategies are possible, the planner
+  is responsible for picking the one it believes will run fastest.
+- **Query processor:** takes the physical plan emitted by the planner and actually runs it, pulling rows from storage
+  and producing the final result set.
 
 ## Types of query planners
 
-Normally, query planners are divided into 2 types:
+Query planners generally fall into one of two camps:
 
 - heuristic planner
 - cost-based planner
 
-Heuristic planner is the query planner which used pre-defined rules to generate query plan.
+A **heuristic planner** applies a fixed set of rewrite rules in a predefined order. Each rule encodes a belief — for
+example, *"pushing filters down is almost always a good idea"* — and is applied blindly whenever it matches.
 
-Cost-based planner is the query planner who based on the cost to generate query, it tries to find the optimal plan based
-on cost of the input query.
+A **cost-based planner** takes a different approach: instead of trusting rules of thumb, it enumerates multiple
+equivalent forms of the query, estimates a numerical cost for each, and picks the cheapest one.
 
-While heuristic planner usually find the best plan by apply transform rules if it knows that the transformed plan is
-better, the cost-based planner find the best plan by enumerate equivalent plans and try to find the best plan among
-them.
+Put more concretely: a heuristic planner greedily *rewrites* its way toward what it hopes is a better plan, while a
+cost-based planner *searches* a space of equivalent plans and lets the cost model be the tiebreaker.
 
 ### Cost based query planner
 
-In cost based query planner, it's usually composed of phases:
+A cost-based planner is typically organized into two phases:
 
 - Plan Enumerations
 - Query Optimization
 
-In the Plan Enumerations phase, the planner will enumerate the possible equivalent plans.
+The **Plan Enumerations** phase generates the universe of candidate plans — every form of the query the planner is
+willing to consider.
 
-After that, in Query Optimization phase, the planner will search for the best plan from the list of enumerated plans.
-The best plan is the plan having the lowest cost, which the cost model (or cost function) is defined.
+The **Query Optimization** phase then sifts through those candidates and picks the one with the lowest cost according
+to whatever cost model has been chosen.
 
-Because the natural of logical plan, is having tree-like structure, so you can think the optimization/search is actually
-a tree-search problem. And there are lots of tree-search algorithms out here:
+Since logical plans are naturally tree-shaped, optimization is really a tree-search problem. Any tree-search algorithm
+is fair game:
 
 - Exhaustive search, such as deterministic dynamic programming. The algorithm will perform searching for best plan until
   search termination conditions
 - Randomized search, such as randomized tree search. The algorithm will perform searching for best plan until
   search termination conditions
 
-**notes:** in theory it's possible to use any kind of tree-search algorithm. However, in practical it's not feasible
-since the
-search time is increased when our search algorithm is complex
+**notes:** in theory any tree-search algorithm will work. In practice, however, the search space is enormous and the
+time budget is short — complex algorithms that look elegant on paper often prove too slow for real workloads.
 
 **notes:** the search termination conditions usually are:
 
@@ -94,9 +96,11 @@ search time is increased when our search algorithm is complex
 
 ### Volcano query planner
 
-Volcano query planner (or Volcano optimizer generator) is a cost-based query planner
+The Volcano query planner (also called the Volcano optimizer generator) is one of the foundational cost-based planners
+in the literature, and its ideas show up in many modern database systems.
 
-Volcano planner uses dynamic programming approach to find the best query plan from the list of enumerated plans.
+At its core, Volcano uses dynamic programming to efficiently find the best plan among the enumerated candidates, reusing
+work across subproblems that appear in multiple plans.
 
 details: https://ieeexplore.ieee.org/document/344061 (I'm too lazy to explain the paper here)
 
@@ -104,8 +108,8 @@ Here is a great explanation: https://15721.courses.cs.cmu.edu/spring2017/slides/
 
 ## Drafting our cost-based query planner
 
-Our query planner, is a cost based query planner, following the basic idea of Volcano query planner
-Our planner will be consisted of 2 main phases:
+The planner we'll build in this guide is cost-based and broadly follows the Volcano design.
+Its lifecycle is split into two phases:
 
 - exploration/search phase
 - implementation/optimization phase
@@ -128,9 +132,13 @@ graph LR
 
 #### Glossary
 
+Before diving into the code, it helps to nail down the vocabulary. The following terms will come up again and again.
+
 ##### Logical plan
 
-Logical plan is the datastructure holding the abstraction of transformation step required to execute the query.
+A logical plan is a tree-shaped data structure that describes *what* the query needs to do, independent of *how* it will
+be executed. Each node represents a relational transformation — a scan, a join, a projection — without committing to a
+specific algorithm.
 
 Here is an example of a logical plan:
 
@@ -151,14 +159,15 @@ graph TD
 
 ##### Physical plan
 
-While logical plan only holds the abstraction, physical plan is the datastructure holding the implementation details.
-Each logical plan will have multiple physical plans. For example, a logical JOIN might has many physical plans such as
-HASH JOIN, MERGE JOIN, BROADCAST JOIN, etc.
+Where the logical plan says *what*, the physical plan says *how*. Each logical node can be realized by one of several
+physical implementations — for example, a logical JOIN might be executed as a HASH JOIN, a MERGE JOIN, or a BROADCAST
+JOIN, each with very different cost characteristics.
 
 ##### Equivalent Group
 
-Equivalent group is a group of equivalent expressions (which for each expression, their logical plan is logically
-equivalent)
+An equivalent group bundles together logical plans that compute the same result — different shapes, same meaning. The
+planner uses these groups to share work: any cost computation done for one member of the group can be reused when
+considering the others.
 
 e.g.
 
@@ -204,18 +213,19 @@ graph TD
     end
     subgraph Group#6
         Expr#12["PROJECT tbl1.id, tbl1.field1, tbl2.field1, tbl2.field2, tbl3.id, tbl3.field2, tbl3.field2"]
-        Expr#6["PROJECT tbl1.id, tbl1.field1, tbl2.field1, tbl2.field2, tbl3.id, tbl3.field2, tbl3.field2"]
+        Expr#6["PROJECT tbl1.id, tbl1.field1, tbl2.id, tbl2.field1, tbl2.field2, tbl3.id, tbl3.field2, tbl3.field2"]
     end
     Expr#12 --> Group#11
     Expr#6 --> Group#5
 ```
 
-Here we can see `Group#6` is having 2 equivalent expressions, which are both representing the same query (one is doing
-scan from table then project, one is pushing down the projection down to SCAN node).
+Notice how `Group#6` contains two equivalent expressions: they describe the same query — one scans then projects, the
+other pushes the projection down into the scan — but produce identical output.
 
 ##### Transformation rule
 
-Transformation rule is the rule to transform from one logical plan to another logical equivalent logical plan
+A transformation rule rewrites one logical plan into another, logically equivalent, logical plan. Transformation rules
+are how new members get added to an equivalent group during exploration.
 
 For example, the plan:
 
@@ -234,7 +244,7 @@ graph TD
     4 --> 6;
 ```
 
-when apply the projection pushdown transformation, is transformed to:
+after a projection-pushdown rule fires, becomes:
 
 ```mermaid
 graph TD
@@ -251,17 +261,21 @@ graph TD
     4 --> 6;
 ```
 
-The transformation rule can be affect by logical traits/properties such as table schema, data statistics, etc.
+Transformation rules can consult logical traits — table schemas, data statistics, and so on — when deciding whether and
+how to fire.
 
 ##### Implementation rule
 
-Implementation rule is the rule to return the physical plans given logical plan.
+An implementation rule converts a logical plan node into one or more physical plan nodes. Whereas transformation rules
+swap one logical shape for another, implementation rules bridge the gap from *logical* to *physical*.
 
-The implementation rule can be affect by physical traits/properties such as data layout (sorted or not), etc.
+Implementation rules can be influenced by physical traits such as the sort order of the underlying data — MERGE JOIN,
+for instance, is only applicable when both inputs are already sorted on the join key.
 
 #### Exploration phase
 
-In the exploration phase, the planner will apply transformation rules, generating equivalent logical plans
+During the exploration phase, the planner repeatedly fires transformation rules to grow each equivalent group with new
+logically equivalent expressions.
 
 For example, the plan:
 
@@ -280,7 +294,7 @@ graph TD
     1343755644 --> -1402686787;
 ```
 
-After applying transformation rules, resulting in the following graph:
+after the exploration phase expands the space with transformation rules, results in the following graph:
 
 ```mermaid
 graph TD
@@ -346,15 +360,17 @@ graph TD
     Expr#6 --> Group#5
 ```
 
-Here we can see that projection pushdown rule and join reorder rule are applied.
+In this expanded graph you can see two rules at work: projection pushdown has produced the new SCAN variants with
+explicit field lists, and join reorder has produced alternative join orderings.
 
 #### Optimization phase
 
-The optimization phase, is to traverse the expanded tree in exploration phase, to find the best
-plan for our query.
+With the search space now populated, the optimization phase's job is to walk the expanded memo and select the cheapest
+physical realization for every group.
 
-This "actually" is tree search optimization, so you can use any tree search algorithm you can imagine (but you have to
-make sure it's correct).
+Because the memo is a graph of groups linked by expressions, this is a tree-search problem in disguise — any correct
+search algorithm will do, though the algorithm you pick directly influences how much of the search space you actually
+visit.
 
 Here is the example of generated physical plan after optimization phase:
 
@@ -407,20 +423,24 @@ Cost: Cost(cpu=40000.00, mem=20000000.00, time=100000.00)
 "]
 ```
 
-The generated plan has shown the selected logical plan, the estimated cost, and the physical operator
+Each node in the final plan shows the logical operation selected, the physical operator chosen to execute it, and the
+estimated cost the planner attributed to the subtree rooted there.
 
 #### Optimize/search termination
 
-Our planner will perform exhaustion search to find the best plan
+For the sake of simplicity, our planner performs an exhaustive search — it keeps going until every candidate has been
+considered. In production systems this is usually impractical, which is why the termination conditions from the
+previous section (search exhaustion, cost threshold, time budget) exist.
 
 ## Diving into the codes
 
-Since the code of the planner is big, so I will not write step-by-step guide, but I will explain every piece of the code
-instead
+The planner is too large to walk through line-by-line, so instead I'll zoom into each component in turn and explain how
+it fits into the whole.
 
 ### The query language
 
-Here we will define a query language which used thoroughly this tutorial
+To keep the focus on the planner, we'll implement a deliberately tiny SQL-like language that we'll use throughout the
+guide.
 
 ```sql
 SELECT emp.id,
@@ -433,26 +453,26 @@ FROM emp
          JOIN emp_info ON dept.emp_id = emp_info.id
 ```
 
-The query language we will implement is a SQL-like language.
-However, for the sake of simplicity, we will restrict its functionality and syntax.
+Our dialect supports a small subset of SQL — enough to exercise the interesting parts of the planner, but nothing more.
 
-The language is appeared in form of
+Queries always have the shape:
 
 ```sql
 SELECT tbl.field, [...]
 FROM tbl JOIN [...]
 ```
 
-It will only support for `SELECT` and `JOIN`, also the field in Select statement must be fully qualified (in form
-of `table.field`), all other functionalities will not be supported
+Two restrictions apply: only `SELECT` and `JOIN` are supported, and every projected field must be fully qualified as
+`table.field`. No aggregates, no filters, no subqueries anywhere except as join sources — this keeps the parser small
+and the planner easy to follow.
 
 #### The AST
 
-First, we have to define the AST for our language. AST (
-or [Abstract Syntax Tree](https://en.wikipedia.org/wiki/Abstract_syntax_tree)) is a tree used to represent the syntactic
-structure of a text.
+The first building block is the AST. An
+[Abstract Syntax Tree](https://en.wikipedia.org/wiki/Abstract_syntax_tree) is a structured representation of the source
+text — a tree whose nodes correspond to constructs in the grammar.
 
-Since our language is so simple, we just can define the AST structure in several line of codes:
+For a language this small, the AST fits in just a handful of case classes:
 
 ```scala
 sealed trait Identifier
@@ -519,11 +539,11 @@ Select(
 
 #### A simple query parser
 
-After defined the AST structure, we will have to write the query parser, which is used to convert the text query into
-AST form.
+With the AST in place, the next step is a parser — the piece that converts the raw query text into an AST.
 
-Since this guide is using Scala for implementation, we will
-choose [scala-parser-combinators](https://github.com/scala/scala-parser-combinators) to create our query parser.
+This guide uses Scala, so we'll reach for
+[scala-parser-combinators](https://github.com/scala/scala-parser-combinators), which lets us describe the grammar
+declaratively and compose small parsers into larger ones.
 
 Query parser class:
 
@@ -569,16 +589,16 @@ private def fieldId: Parser[FieldID] = fqdnStr ^^ { s =>
 }
 ```
 
-Here are two rules, which are used to parse the identifiers: `TableID` and `FieldID`.
+These two rules cover the two kinds of identifiers our language knows about: table names and qualified field names.
 
-Table ID (or table name) usually only contains characters, numbers and underscores (`_`), so we will use a simple
-regex `[a-zA-Z0-9_]+` to identify the table name.
+A table identifier is just an alphanumeric-plus-underscore word, so the regex `[a-zA-Z0-9_]+` is sufficient to pick one
+out of the input.
 
-On the other hand, Field ID (for field qualifier) in our language is fully-qualified-field-name. Normally it's in form
-of `table.field`, and field name also usually only contains characters, numbers and underscores, so we will use the
-regex `[a-zA-Z0-9_]+\.[a-zA-Z0-9_]+` to parser the field name.
+A field identifier, on the other hand, must always be fully qualified — `table.field`. Both halves follow the same
+identifier rules, so the regex `[a-zA-Z0-9_]+\.[a-zA-Z0-9_]+` matches the whole thing; the parser then splits on the
+dot to extract the two components.
 
-After defining the rules for parsing the identifiers, we can now define rules to parse query statement:
+With identifiers handled, we can move on to statement-level parsing:
 
 ```scala
 // statement
@@ -586,24 +606,23 @@ private def table: Parser[Table] = tableId ^^ (t => Table(t))
 private def subQuery: Parser[Statement] = "(" ~> select <~ ")"
 ```
 
-The `table` rule is a simple rule, it just creates `Table` node by using the parsed `TableID` from `tableId` rule.
+The `table` rule is trivial: wrap a parsed `TableID` inside a `Table` AST node.
 
-The `subQuery`, is the rule to parse the sub-query. In SQL, we can write a query which is looked like this:
+The `subQuery` rule handles nested queries. SQL lets us write things like:
 
 ```sql
 SELECT a
 FROM (SELECT b FROM c) d
 ```
 
-The `SELECT b FROM c` is the sub-query in above statement. Here, in our simple query language, we will indicate a
-statement is a sub-query if it is enclosed by a pair of parentheses (`()`). Since our language only have SELECT
-statement, we can write the parse rule as following:
+where `SELECT b FROM c` is a subquery acting as a table source. In our miniature language we signal a subquery by
+wrapping a `SELECT` in parentheses. Because `SELECT` is our only statement form, the rule reduces to:
 
 ```scala
 def subQuery: Parser[Statement] = "(" ~> select <~ ")"
 ```
 
-Now we will define the parse rules for SELECT statement:
+With the pieces in place, here is the rule for the `SELECT` statement itself:
 
 ```scala
 private def fromSource: Parser[Statement] = table ||| subQuery
@@ -639,7 +658,7 @@ private def select: Parser[Select] =
   }
 ```
 
-In SQL, we can use a sub-query as a JOIN source. For example:
+Notice that a JOIN source is itself a `fromSource`, so subqueries are allowed on either side of a JOIN. For example:
 
 ```sql
 SELECT *.*
@@ -648,8 +667,7 @@ FROM tbl1
     JOIN tbl3
 ```
 
-So our parser will also implement rules to parse the sub-query in the JOIN part of the statement, that's why we have the
-parse rule:
+That flexibility is exactly why `fromSource` — rather than `table` — appears in the JOIN part of the rule:
 
 ```scala
 "SELECT" ~ rep1sep(fieldId, ",") ~ "FROM" ~ fromSource ~ rep("JOIN" ~ fromSource ~ "ON" ~ rep1(fieldId ~ "=" ~ fieldId)
@@ -663,9 +681,9 @@ See [QueryParserSpec.scala](core%2Fsrc%2Ftest%2Fscala%2Fcore%2Fql%2FQueryParserS
 
 ### Logical plan
 
-After generate the AST from the text query, we can directly convert it to the logical plan
+Once the parser has produced an AST, converting it into a logical plan is straightforward.
 
-First, lets define the interface for our logical plan:
+We start by defining the shared interface for every logical node:
 
 ```scala
 sealed trait LogicalPlan {
@@ -674,7 +692,8 @@ sealed trait LogicalPlan {
 
 ```
 
-`children` is the list of child logical plan. For example:
+The `children` method returns the node's direct child nodes — the planner walks the plan tree via this relation. For
+example:
 
 ```mermaid
 graph TD
@@ -691,10 +710,10 @@ graph TD
     1343755644 --> -1402686787;
 ```
 
-The child nodes of the `PROJECT` node is the first `JOIN` node. The first `JOIN` node has 2 children, which are the
-second `JOIN` node and `SCAN tbl1` node. So on, ...
+Here the `PROJECT` node's single child is the outer `JOIN`. That `JOIN` has two children — the inner `JOIN` on the right
+and `SCAN tbl1` on the left — and so on down the tree.
 
-Since our query language is simple, we only need 3 types of logical node:
+Our tiny language only needs three kinds of logical node:
 
 - PROJECT: represent the projection operator in relation algebra
 - JOIN: represent the logical join
@@ -715,7 +734,7 @@ case class Join(left: LogicalPlan, right: LogicalPlan, on: Seq[(ql.FieldID, ql.F
 
 ```
 
-Then we can write the function to convert the AST into logical plan:
+Converting the AST into this representation is a one-pass recursive rewrite:
 
 ```scala
 def toPlan(node: ql.Statement): LogicalPlan = {
@@ -734,7 +753,8 @@ implementation
 
 #### Group
 
-We can define classes for Group as following:
+Next we'll model the equivalent-group structure — the data structure that holds everything the planner has discovered
+about a query so far.
 
 ```scala
 case class Group(
@@ -756,11 +776,31 @@ case class GroupExpression(
 
 ```
 
-`Group` is the set of plans which are logically equivalent.
+A `Group` is a set of plans that are all logically equivalent.
 
-Each `GroupExpression` represents a logical plan node. Since we've defined a logical plan node will have a list of child
-nodes (in the previous section), and the `GroupExpression` represents a logical plan node, and the `Group` represents a
-set of equivalent plans, so the children of `GroupExpression` is a list of `Group`
+A `GroupExpression` represents a single logical plan node within that group. Since logical-plan nodes have children (see
+the previous section) and each child could itself be produced in multiple equivalent ways, a `GroupExpression`'s
+children are `Group`s — not concrete plan nodes. This layer of indirection is what lets the planner share work across
+equivalent subtrees.
+
+```mermaid
+graph TD
+    node["Group Expression"]
+    g1["Child Group #1"]
+    g2["Child Group #2"]
+    e1a["Expr A"]
+    e1b["Expr B"]
+    e2a["Expr C"]
+    node --> g1
+    node --> g2
+    subgraph g1
+        e1a
+        e1b
+    end
+    subgraph g2
+        e2a
+    end
+```
 
 e.g.
 
@@ -812,12 +852,11 @@ graph TD
     Expr#6 --> Group#5
 ```
 
-As we can see here, the `Group#6` has 2 equivalent expressions: `Expr#12` and `Expr#6`, and the children of `Expr#12`
-is `Group#11`
+Take `Group#6`: it holds two equivalent expressions, `Expr#12` and `Expr#6`. The former has `Group#11` as its child,
+which itself contains further alternatives — so a single `Group#6` implicitly represents many distinct plans.
 
-**notes:** We will implement multiple round transformation in the exploration phase, so for each `Group`
-and `GroupExpression`, we have
-a `ExplorationMark` indication the exploration status.
+**notes:** Exploration runs in multiple rounds, and we need to know which groups and expressions have already been
+processed in each round. That bookkeeping lives in an `ExplorationMark`:
 
 ```scala
 class ExplorationMark {
@@ -834,16 +873,16 @@ class ExplorationMark {
 
 ```
 
-`ExplorationMark` is just a bitset wrapper class, it will mark i-th bit as 1 if i-th round is explored, mark as 0
-otherwise.
+`ExplorationMark` is essentially a thin wrapper around a bitset: bit `i` is set when round `i` has been explored, and
+cleared otherwise.
 
-`ExplorationMark` can also be used to visualize the exact transformation,
-see [visualization](core%2Fsrc%2Fmain%2Fscala%2Fcore%2Futils%2Fvisualization) for more details
+It's also handy for visualization — being able to replay the state after each round makes it easy to see exactly what
+changed. See [visualization](core%2Fsrc%2Fmain%2Fscala%2Fcore%2Futils%2Fvisualization) for details.
 
 #### Memo
 
-Memo is a bunch of helpers to help constructing the equivalent groups. Memo is consists of several hashmap to cache the
-group and group expression, also provide methods to register new group or group expression.
+The memo is the bookkeeping layer on top of groups and group expressions. It stores everything the planner has seen so
+far, keyed for quick lookup, and provides helpers for registering new logical plans.
 
 ```scala
 class Memo(
@@ -899,7 +938,7 @@ See [Memo.scala](core%2Fsrc%2Fmain%2Fscala%2Fcore%2Fplanner%2Fvolcano%2Fmemo%2FM
 
 ### Initialization
 
-The first step inside the planner, is initialization
+The planner's first job, before any rules fire, is to wire up the initial state.
 
 ```mermaid
 graph LR
@@ -912,8 +951,8 @@ graph LR
     root_plan -- " memo.getOrCreateGroup(rootPlan) " --> root_group
 ```
 
-First, query will be parsed into AST. Then converted to logical plan, called `root plan`, then initialize the group
-from `root plan`, called `root group`.
+The query text goes through the parser to become an AST, the AST is converted into a logical plan — the *root plan* —
+and finally the root plan is registered with the memo, producing the *root group* that represents the entire query.
 
 ```scala
 def initialize(query: Statement)(implicit ctx: VolcanoPlannerContext): Unit = {
@@ -930,7 +969,7 @@ def initialize(query: Statement)(implicit ctx: VolcanoPlannerContext): Unit = {
 
 See [VolcanoPlanner.scala](core%2Fsrc%2Fmain%2Fscala%2Fcore%2Fplanner%2Fvolcano%2FVolcanoPlanner.scala) for more details
 
-For example, the query:
+For example, given the query:
 
 ```sql
 SELECT tbl1.id,
@@ -946,7 +985,7 @@ FROM tbl1
          JOIN tbl3 ON tbl2.id = tbl3.id
 ```
 
-after initialization, the groups will be looked like this:
+initialization produces a memo that looks like this:
 
 ```mermaid
 graph TD
@@ -975,13 +1014,14 @@ graph TD
     Expr#6 --> Group#5
 ```
 
-Here you can see that, every group has exactly one equivalent expression
+At this point every group contains exactly one expression — the original plan, untransformed. Exploration will add more.
 
 ### Exploration phase
 
-After initialization, now is the exploration phase, which will explore all possible equivalent plans.
+With the memo initialized, exploration can start. Its goal is to populate each equivalent group with every logically
+equivalent plan the rules can produce.
 
-The exploration method is quite simple:
+The exploration loop has a simple shape:
 
 - For each group, apply transformation rules to find all equivalent group expression and add to equivalent set until we
   couldn't find any new equivalent plan
@@ -989,10 +1029,10 @@ The exploration method is quite simple:
 
 #### Transformation rule
 
-Before diving into exploration code, lets talk about transformation rule first.
+Before looking at the exploration loop itself, let's look at a transformation rule in detail.
 
-Transformation rule is a rule used to transform a logical plan to another equivalent logical plan if it's matched the
-rule condition.
+A transformation rule encapsulates two things: a *match* predicate that decides whether the rule is applicable, and a
+*transform* function that produces the new equivalent plan.
 
 Here is the interface of transformation rule:
 
@@ -1005,11 +1045,9 @@ trait TransformationRule {
 
 ```
 
-Since the logical plan is a tree-like datastructure, so the `match` implementation of transformation rules is pattern
-matching on tree.
+Because logical plans are trees, the `match` implementation is nothing more than pattern matching over those trees.
 
-For example, here is the `match` that is used to match the PROJECT node while also check if it's descendants containing
-JOIN and SCAN only:
+For instance, this `match` accepts any PROJECT node whose descendants contain only JOIN and SCAN nodes:
 
 ```scala
 override def `match`(expression: GroupExpression)(implicit ctx: VolcanoPlannerContext): Boolean = {
@@ -1030,7 +1068,7 @@ private def check(node: LogicalPlan): Boolean = {
 }
 ```
 
-This plan is "matched":
+This plan matches:
 
 ```mermaid
 graph TD
@@ -1059,7 +1097,7 @@ graph TD
     Expr#6 --> Group#5
 ```
 
-While this plan is not:
+This one does not, because a PROJECT sits beneath a JOIN rather than at the top:
 
 ```mermaid
 graph TD
@@ -1094,13 +1132,13 @@ graph TD
 
 #### Plan enumerations
 
-As we've said before, the exploration method is:
+Recall the exploration loop:
 
 - For each group, apply transformation rules to find all equivalent group expression and add to equivalent set until we
   couldn't find any new equivalent plan
 - For each group expression, explore all child groups
 
-And here is exploration code (quite simple, huh):
+Translated to code (spoiler: it's short):
 
 ```scala
 private def exploreGroup(
@@ -1148,11 +1186,12 @@ See [VolcanoPlanner.scala](core%2Fsrc%2Fmain%2Fscala%2Fcore%2Fplanner%2Fvolcano%
 
 #### Implement some transformation rules
 
-Now it's time to implement some transformation rules
+Time to see the machinery in action. We'll implement two representative rules: projection pushdown and join reorder.
 
 ##### Projection pushdown
 
-Projection pushdown is a simple transformation rule, used to push the projection down to storage layer.
+Projection pushdown is about asking the storage layer for only the columns we actually need, rather than reading full
+rows and throwing away most of them later.
 
 For example, the query
 
@@ -1170,12 +1209,11 @@ graph LR
     project --> scan
 ```
 
-With this plan, when executing, rows from storage layer (under SCAN) will be fully fetched, and then unnecessary fields
-will be dropped (PROJECT). The unnecessary data is still have to move from SCAN node to PROJECT node, so there are some
-wasted efforts here.
+As written, the SCAN returns every column of `tbl`, and the PROJECT then discards everything except `field1` and
+`field2`. All those unused columns have to travel from storage up to the PROJECT just to be thrown away — pure waste.
 
-We can make it better by just simply tell the storage layer only fetch the necessary fields. Now the plan will be
-transformed to:
+If we push the projection all the way into the scan, the storage layer only has to materialize the two columns we care
+about:
 
 ```mermaid
 graph LR
@@ -1205,11 +1243,11 @@ private def check(node: LogicalPlan): Boolean = {
 }
 ```
 
-Our projection pushdown rule here, will match the plan when it's the PROJECT node, and all of its descendants are SCAN
-and JOIN node only.
+The rule matches any PROJECT whose entire subtree is made up of SCANs and JOINs — the cases where pushdown is trivially
+safe.
 
-**notes:** Actually the real projection pushdown match is more complex, but for the sake of simplicity, the match rule
-here is just PROJECT node with SCAN and JOIN descendants
+**notes:** A real projection-pushdown rule is a fair bit more nuanced (aggregations, filters, non-deterministic
+functions, etc.). We're sticking to the simple case on purpose.
 
 And here is the transform code:
 
@@ -1252,10 +1290,10 @@ private def pushDown(pushDownProjection: Seq[FieldID], node: LogicalPlan): Logic
 }
 ```
 
-The transform code will first find all projections from the root PROJECT node, and then push them down to all SCAN nodes
-under it.
+The transform first walks the subtree to collect every field that's actually referenced — both the top-level projection
+and any join keys — then walks the tree again, attaching the relevant subset of fields to each SCAN.
 
-Visualizing our rule, for example, the plan
+To see the rule in action, start from this plan:
 
 ```mermaid
 graph TD
@@ -1284,8 +1322,8 @@ graph TD
     Expr#6 --> Group#5
 ```
 
-after applying projection pushdown transformation, will result in a new equivalent plan with the projections are pushed
-down to the SCAN operations (the new plan is the tree with orange border nodes).
+Applying projection pushdown produces a new equivalent plan where each SCAN carries the list of columns it needs. The
+newly added nodes and edges are highlighted in orange.
 
 ```mermaid
 graph TD
@@ -1351,11 +1389,11 @@ for full implementation
 
 ##### Join reorder
 
-Join reorder is also one of the most recognized transformation in the world of query planner. Our planner, will also
-implement a reorder transformation rule.
+Join reorder is one of the most impactful transformations a cost-based planner can do — the order in which tables are
+joined can change execution time by orders of magnitude.
 
-Since Join reorder in real world is not an easy piece to implement. So we will implement a simple, rip-off version of
-join reorder rule here.
+Industrial-grade join reorder is a substantial piece of engineering. To keep this guide approachable, we'll implement a
+deliberately stripped-down version that only handles a narrow case.
 
 First, the rule `match`:
 
@@ -1421,8 +1459,8 @@ override def `match`(expression: GroupExpression)(implicit ctx: VolcanoPlannerCo
 }
 ```
 
-Our rule will only be matched, if we match the 3-way JOIN (the number of involved table must be 3, and the join
-condition must be 3-way, such as `tbl1.field1 = tbl2.field2 = tbl3.field3`)
+The rule only fires on a three-way JOIN whose join conditions form a fully interchangeable chain — i.e. exactly three
+tables joined on a single transitive equality.
 
 For example,
 
@@ -1432,8 +1470,8 @@ tbl1
     JOIN tbl3 ON tbl1.field1 = tbl3.field3
 ```
 
-The join statement here will be "matched" since it's 3-way JOIN (it's the join between `tbl1`, `tbl2`, `tbl3`, and the
-condition is `tbl1.field1 = tbl2.field2 = tbl3.field3`)
+matches: three tables (`tbl1`, `tbl2`, `tbl3`) connected through the single equality class
+`tbl1.field1 = tbl2.field2 = tbl3.field3`.
 
 Next, is the transform code:
 
@@ -1482,16 +1520,17 @@ override def transform(expression: GroupExpression)(implicit ctx: VolcanoPlanner
 }
 ```
 
-The transform code here, will reorder the tables by its estimated size.
+The transform reorders the three tables by estimated size, putting the smallest on the outside — a cheap but often
+effective heuristic.
 
-For example, if we have 3 tables A, B, C with estimated size of 300b, 100b, 200b and a JOIN statement `A JOIN B JOIN C`,
-then it will be transformed into `B JOIN C JOIN A`
+For instance, if tables A, B, C have estimated sizes 300b, 100b, 200b and the original statement is `A JOIN B JOIN C`,
+the rewritten plan becomes `B JOIN C JOIN A`.
 
-**notes:** You might notice in this code, we've made use of table statistics, to provide a hint to transform the plan.
-In practical, the planner can use all sorts of statistics to aid its transformation such as table size, row size, null
-count, histogram, etc.
+**notes:** This rule already touches table statistics. Real planners lean on them heavily — table size is just the
+beginning; row width, null counts, distinct-value counts, histograms, and index availability all feed into better
+decisions.
 
-Visualizing our rule, for example, the plan
+To visualize: starting from this plan,
 
 ```mermaid
 graph TD
@@ -1520,7 +1559,7 @@ graph TD
     Expr#6 --> Group#5
 ```
 
-after join reorder transformation, resulting in
+applying join reorder yields:
 
 ```mermaid
 graph TD
@@ -1563,15 +1602,15 @@ graph TD
     linkStyle 7 stroke-width: 4px, stroke: orange
 ```
 
-we can see that `tbl2 JOIN tbl1 JOIN tbl3` is created from `tbl1 JOIN tbl2 JOIN tbl3` is generated by the
-transformation (the newly added nodes and edges are indicated by orange lines)
+The rule has produced `tbl2 JOIN tbl1 JOIN tbl3` alongside the original `tbl1 JOIN tbl2 JOIN tbl3`; the newly added
+expressions and edges are shown in orange.
 
 See [X3TableJoinReorderBySize.scala](core%2Fsrc%2Fmain%2Fscala%2Fcore%2Fplanner%2Fvolcano%2Frules%2Ftransform%2FX3TableJoinReorderBySize.scala)
 for full implementation
 
 ##### Putting all transformations together
 
-Now we can put our transformation rules in one place
+Finally, we can register every rule in one place:
 
 ```scala
 private val transformationRules: Seq[Seq[TransformationRule]] = Seq(
@@ -1580,7 +1619,7 @@ private val transformationRules: Seq[Seq[TransformationRule]] = Seq(
 )
 ```
 
-And run them to explore the equivalent groups
+and kick off an exploration round for each group:
 
 ```scala
 for (r <- transformationRules.indices) {
@@ -1617,7 +1656,7 @@ graph TD
     Expr#6 --> Group#5
 ```
 
-after being explored, will result in this graph
+after exploration, expands to:
 
 ```mermaid
 graph TD
@@ -1710,15 +1749,17 @@ See [VolcanoPlanner.scala](core%2Fsrc%2Fmain%2Fscala%2Fcore%2Fplanner%2Fvolcano%
 
 ### Optimization phase
 
-After exploration phase, we now have a fully expanded tree containing all possible plans, now is the optimization phase.
+With exploration complete, the memo now holds every candidate plan. The optimization phase's job is to walk that memo
+and pick the winner.
 
-In this phase, we will find the best plan for our root group. The optimization process is described as following:
+The walk is recursive and bottom-up:
 
 - For each group, we will find the best implementation by choosing the group expressing with the lowest cost
 - For each group expression, first we will enumerate the physical implementations from the logical plan. Then for each
   physical implementation, we will calculate its cost using its child group costs.
 
-Here is an example
+Costs compose from the bottom: a node's cost is some function of its own work plus the costs of its children. Here is
+an example
 
 ```mermaid
 graph TD
@@ -1756,14 +1797,14 @@ graph TD
     Expr#7 --> Group#9
 ```
 
-for example, the `Expr#4` cost is calculated by its child group costs (`Group#2` and `Group#3`) using `max` function.
-Another example, is the `Group#4`, its cost is calculated by calculating the min value between the costs of its
-equivalent expressions.
+Two things to notice here. `Expr#4`'s cost is computed from its children (`Group#2` and `Group#3`) via a `max` function
+— that's the per-expression composition rule. Meanwhile, `Group#4`'s cost is the minimum across its equivalent
+expressions — because within a group we pick the cheapest realization.
 
 #### Physical plan
 
-Since the goal of optimization phase is to produce the best physical plan given the explored group expressions. We can
-define the physical plan as following:
+The goal of optimization is to produce the best physical plan for the root group, so we need a physical plan data
+structure to hold it in:
 
 ```scala
 sealed trait PhysicalPlan {
@@ -1780,12 +1821,15 @@ sealed trait PhysicalPlan {
 
 ```
 
-The `operator` is the physical operator, which used to execute the plan, we will cover it in later section.
-Then `children` is the list of child plan nodes, they're used to participating in the process of cost calculation. The
-third attribute is `cost`, `cost` is an object holding cost information (such as CPU cost, Memory cost, IO cost,
-etc.). `estimations` is the property holding estimated statistics about the plan (such as row count, row size, etc.),
-it's also participating in cost calculation. Finally, `traits` is a set of physical traits, which affect the
-implementation rule to affect the physical plan generation process.
+Each field earns its keep:
+
+- `operator` is the runtime executor for this node — we'll cover operators in the execution section.
+- `children` are the subplans whose outputs feed this node; they participate in cost composition.
+- `cost` bundles per-dimension cost estimates (CPU, memory, time, and so on).
+- `estimations` carries statistical estimates (row count, row size, etc.) that downstream nodes use in their own cost
+  calculations.
+- `traits` is a set of physical properties (like `SORTED`) that implementation rules can inspect when deciding whether
+  they apply.
 
 Next, we can implement the physical node classes:
 
@@ -1827,11 +1871,13 @@ full implementation
 
 #### Implementation rule
 
-The first thing in optimization phase, that is, we have to implement the implementation rules. Implementation rule is
-the rule to convert from logical plan to physical plans without executing them.
+Optimization relies on implementation rules — the rules that convert a logical plan node into one or more physical
+plan nodes.
 
-Since we're not directly executing the physical plan in the planner, so we will return the physical plan builder
-instead, also it's easier to customize the cost function for each node.
+A subtle but important detail: the planner doesn't *execute* anything during optimization, it just compares costs. So
+instead of returning finished physical plans, implementation rules return *physical plan builders* — small objects that
+know how to assemble a physical node given the already-costed child plans. This gives each rule the freedom to shape
+cost differently per implementation.
 
 Here is the interface of implementation rule:
 
@@ -1846,9 +1892,10 @@ trait ImplementationRule {
 
 ```
 
-Here the `PhysicalPlanBuilder` is the interface used to build the physical plan, given the child physical plans.
+A `PhysicalPlanBuilder` is simply a factory: give it the child physical plans, it hands back a physical plan for the
+current node.
 
-For example, the logical JOIN has 2 physical implementations are HASH JOIN and MERGE JOIN
+Consider a logical JOIN with two physical realizations, HASH JOIN and MERGE JOIN:
 
 ```mermaid
 graph TD
@@ -1868,13 +1915,12 @@ graph TD
     merge_join --> child#4
 ```
 
-the HASH JOIN cost is using function `f()` to calculate cost, and MERGE JOIN is using function `g()` to calculate cost,
-both are using its children as function parameters. So it's easier to code if we're returning just the phyiscal plan
-builder from the implementation rule instead of the physical plan.
+HASH JOIN computes its cost via function `f()` and MERGE JOIN via function `g()`, each of which takes its children as
+inputs. Returning builders rather than pre-built physical plans lets each algorithm own its own cost math cleanly.
 
 #### Finding the best plan
 
-As we've said before, the optimization process is described as following:
+Back to the optimization walk:
 
 - For each group, we will find the best implementation by choosing the group expressing with the lowest cost
 - For each group expression, first we will enumerate the physical implementations from the logical plan. Then for each
@@ -1927,10 +1973,11 @@ private def implementGroup(group: Group, combinedRule: ImplementationRule)(
 }
 ```
 
-This code is an exhaustive search code, which is using recursive function to traverse all nodes. At each node (group),
-the function is called once to get its best plan while also calculate the optimal cost of that group.
+This is an exhaustive recursive walk: every group is visited, every equivalent expression is considered, every
+applicable implementation builder is tried. The `implementation` field on each group caches the winner so we don't
+revisit it.
 
-Finally, the best plan for our query is the best plan of the root group
+The best plan for the query as a whole is simply the best plan for the root group:
 
 ```scala
 val implementationRules = new ImplementationRule {
@@ -1952,8 +1999,8 @@ ctx.rootGroup.implementation = Option(implementGroup(ctx.rootGroup, implementati
 See [VolcanoPlanner.scala](core%2Fsrc%2Fmain%2Fscala%2Fcore%2Fplanner%2Fvolcano%2FVolcanoPlanner.scala) for full
 implementation
 
-Here is an example of the plan after optimization, it's shown the selected logical node, the selected physical operator,
-and the estimated cost
+The resulting plan shows, for each group, the logical expression the planner picked, the physical operator chosen to
+execute it, and the subtree's estimated cost:
 
 ```mermaid
 
@@ -2006,11 +2053,11 @@ Cost: Cost(cpu=40000.00, mem=20000000.00, time=100000.00)
 
 #### Implement the implementation rules
 
-Next, we will implement some implementation rules.
+With the machinery in place, let's flesh out a few concrete rules.
 
 ##### PROJECT
 
-The first, easiest one is the implementation rule of logical PROJECT
+PROJECT is the easiest case — no algorithmic alternatives, just a straightforward wrapper around the child plan.
 
 ```scala
 object Project {
@@ -2054,28 +2101,26 @@ class ProjectionImpl(projection: Seq[ql.FieldID]) extends PhysicalPlanBuilder {
 
 ```
 
-The implementation rule for logical PROJECT, is returning one physical plan builder `ProjectionImpl`. `ProjectionImpl`
-cost calculation is simple, it just inherits the cost from the child node (because the projection is actually not doing
-any intensive operation). Beside that, it also updates the estimation (in this code, estimation is also inherit from the
-child node)
+There is exactly one builder, `ProjectionImpl`. Its cost is essentially a passthrough — we treat projection as free —
+and its row-count/row-size estimates are inherited from the child. In a more realistic model, projection would shrink
+row size (and thus downstream memory cost); keeping it trivial here is fine for illustration.
 
 See [Project.scala](core%2Fsrc%2Fmain%2Fscala%2Fcore%2Fplanner%2Fvolcano%2Frules%2Fimplement%2FProject.scala) for full
 implementation
 
 ##### JOIN
 
-Writing implementation rule for logical JOIN is way harder than PROJECTION.
+JOIN is where implementation rules earn their keep.
 
-One first reason is, a logical JOIN has many
-physical implementation, such as HASH JOIN, MERGE JOIN, BROADCAST JOIN, etc.
+The first reason it's harder is variety: a single logical JOIN can be realized by HASH JOIN, MERGE JOIN, BROADCAST JOIN,
+nested-loop join, and several others, each with its own algorithm and cost profile.
 
-The second reason is, estimating cost for
-physical JOIN is also hard, because it depends on lots of factors such as row count, row size, data histogram, indexes,
-data layout, etc.
+The second reason is cost estimation itself: a physical join's cost depends on row counts, row widths, data
+distributions, indexes, sort orders, memory availability, and more — any one of which can shift the winner.
 
-So, to keep everything simple in this guide, I will only implement 2 physical JOIN: HASH JOIN and MERGE JOIN. The cost
-estimation functions are fictional (just to show how it works, I'm not trying to correct it). And in the MERGE JOIN, all
-data is assuming to be sorted by join key.
+To stay focused, we'll implement only HASH JOIN and MERGE JOIN, the cost functions are intentionally simplified (they
+illustrate the shape of the calculation, not the rigor you'd want in production), and MERGE JOIN assumes its inputs are
+already sorted on the join key.
 
 Here is the code:
 
@@ -2155,7 +2200,8 @@ class HashJoinImpl(leftFields: Seq[String], rightFields: Seq[String]) extends Ph
 
 ```
 
-We can see that the cost function of HASH JOIN is composed of its children costs and estimations
+HASH JOIN's cost is built from two contributions — the work it adds on top of its children, and the costs propagated
+up from those children:
 
 ```scala
 val selfCost = Cost(
@@ -2241,8 +2287,8 @@ class MergeJoinImpl(leftFields: Seq[String], rightFields: Seq[String]) extends P
 
 ```
 
-Same with HASH JOIN, MERGE JOIN also uses its children costs and estimations to calculate its cost, but with different
-formulla:
+MERGE JOIN follows the same self-plus-children pattern, but with noticeably cheaper per-node work — since both inputs
+are already sorted, there's no hash table to build and no memory overhead, just a linear walk:
 
 ```scala
 val selfCost = Cost(
@@ -2275,15 +2321,15 @@ for full implementation
 
 ##### Others
 
-You can see other rules and physical plan builders here:
+The rest of the rules and builders follow the same pattern; browse them here:
 
 - [implement](core%2Fsrc%2Fmain%2Fscala%2Fcore%2Fplanner%2Fvolcano%2Frules%2Fimplement)
 - [builder](core%2Fsrc%2Fmain%2Fscala%2Fcore%2Fplanner%2Fvolcano%2Fphysicalplan%2Fbuilder)
 
 #### Putting all pieces together
 
-Now, after done implementing the implementation rules, now we can find our best plan. Let's start over from the user
-query
+With the implementation rules written, we have everything we need to plan an end-to-end query. Let's trace one from
+query text to final physical plan.
 
 ```sql
 SELECT tbl1.id,
@@ -2299,7 +2345,7 @@ FROM tbl1
          JOIN tbl3 ON tbl2.id = tbl3.id
 ```
 
-will be converted to the logical plan
+first, parsing and AST-to-plan conversion produce the initial logical plan:
 
 ```mermaid
 graph TD
@@ -2316,7 +2362,7 @@ graph TD
     1343755644 --> -1402686787;
 ```
 
-After exploration phase, it will generate lots of equivalent plans
+next, exploration fires the transformation rules and fills out the memo with equivalent alternatives:
 
 ```mermaid
 graph TD
@@ -2405,7 +2451,7 @@ graph TD
     linkStyle 11 stroke-width: 4px, stroke: orange
 ```
 
-And the at optimization phase, a final best plan is chose
+finally, optimization selects the cheapest physical realization end-to-end:
 
 ```mermaid
 graph TD
@@ -2457,10 +2503,11 @@ Cost: Cost(cpu=40000.00, mem=20000000.00, time=100000.00)
 
 ### Bonus: query execution
 
-Now we've done building a functional query planner which can optimize the query from user, but our query plan could not
-run by itself. So it's the reason why now we will implement the query processor to test out our query plan.
+At this point the planner produces optimized plans, but those plans don't run on their own. To close the loop, we'll
+tack on a small query processor so we can watch an end-to-end query produce actual rows.
 
-Basically the query process receive input from the query planner, and execute them
+A query processor consumes the physical plan from the planner, reads data from the storage layer, and emits rows to the
+caller.
 
 ```mermaid
 graph LR
@@ -2473,14 +2520,14 @@ graph LR
 
 #### Volcano/Iterator model
 
-Volcano/iterator model is the query processing model that is widely used in many DBMS. It is a pipeline architecture,
-which means that the data is processed in stages, with each stage passing the output of the previous stage to the next
-stage.
+The Volcano (or iterator) model is the execution model most textbooks introduce first, and it's still the starting point
+in many real DBMSes. It's a pull-based pipeline: each operator exposes a `next()` method, and calling it on the root
+pulls exactly one row through the entire plan.
 
-Each stage in the pipeline is represented by an operator. Operators are functions that perform a specific operation on
-the data, such as selecting rows, filtering rows, or aggregating rows.
+Each operator in the pipeline performs a specific transformation — scanning, filtering, projecting, joining — and
+passes results up to its parent one row at a time.
 
-Usually, operator can be formed directly from the query plan. For example, the query
+Typically, there's a one-to-one mapping between plan nodes and operators. For example, the query
 
 ```sql
 SELECT field_1
@@ -2499,7 +2546,7 @@ graph TD
   filter --> project
 ```
 
-will create a chain of operators like this:
+compiles to this chain of iterator operators:
 
 ```text
 scan = {
@@ -2534,7 +2581,7 @@ while (row = filter.next()) {
 
 #### The operators
 
-The basic interface of an operator is described as following:
+The operator interface really is this small:
 
 ```scala
 trait Operator {
@@ -2548,7 +2595,7 @@ operators
 
 #### Testing a simple query
 
-Let's define a query
+To tie everything together, let's run a real query through the whole pipeline.
 
 ```sql
 SELECT emp.id,
@@ -2561,7 +2608,7 @@ FROM emp
          JOIN emp_info ON dept.emp_id = emp_info.id
 ```
 
-with some data and stats
+Against these in-memory datasources (including row counts, sort metadata, and basic column statistics):
 
 ```scala
 val table1: Datasource = Datasource(
@@ -2627,7 +2674,7 @@ val table3: Datasource = Datasource(
 )
 ```
 
-The cost model is optimized for CPU
+Configure the cost model to minimize CPU cost:
 
 ```scala
 val costModel: CostModel = (currentCost: Cost, newCost: Cost) => {
@@ -2635,7 +2682,7 @@ val costModel: CostModel = (currentCost: Cost, newCost: Cost) => {
 }
 ```
 
-Now, executing the query by running this code:
+And wire it all up — parse, plan, execute, print:
 
 ```scala
 val planner = new VolcanoPlanner
@@ -2650,7 +2697,7 @@ QueryParser.parse(query) match {
 }
 ```
 
-it will print:
+Running it prints:
 
 ```text
 emp.id,emp.code,dept.dept_name,emp_info.name,emp_info.origin
@@ -2660,12 +2707,12 @@ emp.id,emp.code,dept.dept_name,emp_info.name,emp_info.origin
 3,Emp C,Dept 3,CCCCC,Country B
 ```
 
-Voila, We've done building a fully functional query planner and query engine :). You can start writing one for your own,
-good luck
+And that's it — a working cost-based planner plus an execution engine, end to end. From here you have all the pieces
+you need to start extending it or writing your own. Good luck :)
 
 See [Demo.scala](demo%2Fsrc%2Fmain%2Fscala%2Fdemo%2FDemo.scala) for full demo code
 
 # Thanks
 
-Thanks for reading this, this guide is quite long, and not fully correct, but I've tried my best to write it as
-understandably as possible :beers:
+Thanks for sticking with this to the end. The guide is long and not everything is fully rigorous, but I've done my best
+to make the moving parts visible and the ideas easy to hold in your head :beers:
